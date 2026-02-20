@@ -63,6 +63,16 @@ html, body {
 }
 .user-av:hover { opacity: 0.7; }
 
+/* ── CHIP BUTTON ── */
+.chip-btn {
+  display: flex; align-items: center; justify-content: center;
+  padding: 6px 12px; border-radius: 100px;
+  border: 1px solid var(--g2); background: var(--white);
+  font-family: 'DM Mono', monospace; font-size: 12px; color: var(--g4);
+  cursor: pointer; transition: all 0.15s;
+}
+.chip-btn:hover { background: var(--black); color: var(--white); border-color: var(--black); }
+
 /* Dashboard open button in header */
 .dash-btn {
   display: flex; align-items: center; gap: 5px;
@@ -297,3 +307,24 @@ html, body {
 .d1{animation-delay:.05s} .d2{animation-delay:.10s} .d3{animation-delay:.15s}
 .d4{animation-delay:.20s} .d5{animation-delay:.25s} .d6{animation-delay:.30s}
 @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+
+/* ── PROFILE PAGE ── */
+.profile-header { display: flex; flex-direction: column; align-items: center; padding: 32px 20px; gap: 8px; }
+.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--black); color: var(--white); font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.profile-name { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; }
+.profile-email { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--g3); }
+.settings-group { border: 1px solid var(--g2); border-radius: var(--r); margin-bottom: 8px; overflow: hidden; }
+.settings-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--g1); }
+.settings-item:last-child { border-bottom: none; }
+.settings-label { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--g3); text-transform: uppercase; letter-spacing: 0.5px; }
+.settings-value { font-size: 13px; font-weight: 500; }
+.settings-value.mono { font-family: 'DM Mono', monospace; font-size: 12px; }
+.chip { padding: 4px 10px; border-radius: 100px; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.5px; }
+.chip-green { background: rgba(22, 163, 74, 0.1); color: var(--green); border: 1px solid var(--green); }
+.settings-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px; border: none; background: none; font-family: 'DM Mono', monospace; font-size: 12px; cursor: pointer; transition: background 0.15s; }
+.settings-btn.danger { color: var(--red); }
+.settings-btn.danger:hover { background: rgba(220, 38, 38, 0.05); }
+.settings-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; }
+.profile-disclaimer { display: flex; gap: 12px; padding: 16px; background: var(--g1); border-radius: var(--r); margin-top: 20px; }
+.disclaimer-icon { font-size: 18px; }
+.disclaimer-text { font-size: 11px; color: var(--g4); line-height: 1.5; }

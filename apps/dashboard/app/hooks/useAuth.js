@@ -1,6 +1,8 @@
 "use client";
+import { useRealAuth } from "./useRealAuth";
 import { useMockAuth } from "./useMockAuth";
 
 export function useAuth() {
-  return useMockAuth();
+  const isMock = process.env.NEXT_PUBLIC_USE_MOCK_AUTH === "true";
+  return isMock ? useMockAuth() : useRealAuth();
 }

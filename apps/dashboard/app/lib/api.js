@@ -80,23 +80,102 @@ export const MOCK_WALLET = {
   trades: MOCK_TRADES.length,
 };
 
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const abbr = (n) => {
+  if (n == null) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (abs >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (abs >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(Math.round(n));
+};
+const getStoredWallet = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem('walletAddress');
+  } catch {
+    return null;
+  }
+};
+
 // ─── SIGNALS ─────────────────────────────────────────────────────────────────
-// Intern 1 + 2: replace with → fetch(`${BASE}/signals?top=20`)
 
 export async function getSignals(filter = 'all') {
-  // LIVE: return fetch(`${BASE}/signals?filter=${filter}`).then(r => r.json());
-  await sim();
-  if (filter === 'all') return MOCK_SIGNALS;
-  return MOCK_SIGNALS.filter(s => s.status === filter);
+  try {
+    const res = await fetch(`${BASE}/api/signals?top=20`);
+    const data = await res.json();
+    const signals = (data.signals || []).map(s => {
+      const heatPct = Math.max(0, Math.min(100, Math.round((s.score || 0) * 100)));
+      const status = heatPct >= 80 ? 'hot' : heatPct >= 50 ? 'warm' : 'cool';
+      return {
+        id: s.market_id,
+        cat: s.category || 'General',
+        heat: `${heatPct}° ${status.toUpperCase()}`,
+        status,
+        q: s.question || 'Unknown market',
+        yes: Math.round((s.current_odds || 0) * 100),
+        vol: abbr(s.volume || 0),
+        locked: (s.score || 0) >= 0.7,
+        advice: s.reason || '',
+      };
+    });
+    if (filter === 'all') return signals;
+    return signals.filter(s => s.status === filter);
+  } catch (e) {
+    if (filter === 'all') return MOCK_SIGNALS;
+    return MOCK_SIGNALS.filter(s => s.status === filter);
+  }
 }
 
 // ─── SINGLE MARKET ───────────────────────────────────────────────────────────
 // Intern 1: replace with → fetch(`${BASE}/markets/${id}`)
 
 export async function getMarket(id) {
-  // LIVE: return fetch(`${BASE}/markets/${id}`).then(r => r.json());
-  await sim(300);
-  return MOCK_SIGNALS.find(s => s.id === id) || null;
+  try {
+    const res = await fetch(`${BASE}/markets/${id}`);
+    if (!res.ok) return null;
+    const m = await res.json();
+    return {
+      id: m.id,
+      q: m.question,
+      cat: m.category,
+      yes: Math.round((m.current_odds || 0) * 100),
+      vol: abbr(m.volume || 0),
+      status: 'info',
+      advice: '',
+      locked: false,
+    };
+  } catch {
+    return MOCK_SIGNALS.find(s => s.id === id) || null;
+  }
+}
+
+export async function listMarkets() {
+  try {
+    const res = await fetch(`${BASE}/markets`);
+    const data = await res.json();
+    return (data.markets || []).map(m => ({
+      id: m.id,
+      q: m.question,
+      cat: m.category,
+      yes: Math.round((m.current_odds || 0) * 100),
+      vol: abbr(m.volume || 0),
+      status: 'info',
+      advice: '',
+      locked: false,
+    }));
+  } catch {
+    return MOCK_SIGNALS;
+  }
+}
+
+export async function refreshMarkets() {
+  try {
+    const res = await fetch(`${BASE}/markets/refresh`);
+    return await res.json();
+  } catch {
+    return { status: 'error' };
+  }
 }
 
 // ─── FREE ADVICE (OpenClaw) ───────────────────────────────────────────────────
@@ -157,37 +236,108 @@ export async function verifyPayment(proof) {
 // Intern 5: replace with → fetch(`${BASE}/papertrade`, { method: 'POST', ... })
 
 export async function paperTrade({ marketId, side, amount, price }) {
-  // LIVE:
-  // return fetch(`${BASE}/papertrade`, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ marketId, side, amount, price }),
-  // }).then(r => r.json());
-  await sim(700);
-  return {
-    id: `t${Date.now()}`,
-    marketId, side, amount, price,
-    pnl: 0,
-    status: 'open',
-    ts: Date.now(),
-    txHash: null, // Intern 5: set to Polygon testnet hash if COMMIT_TX mode
-  };
+  try {
+    const wallet = getStoredWallet();
+    // Fetch market question for backend schema
+    let question = '';
+    try {
+      const m = await getMarket(marketId);
+      question = m?.q || '';
+    } catch {}
+    const body = {
+      telegram_user_id: wallet || 'dev_user',
+      market_id: String(marketId),
+      market_question: question || `Market ${marketId}`,
+      outcome: (side || '').toUpperCase() === 'NO' ? 'NO' : 'YES',
+      shares: Math.max(1, Math.round((parseFloat(amount) / price) * 10) / 10),
+      price_per_share: price,
+      direction: 'BUY',
+    };
+    const res = await fetch(`${BASE}/api/papertrade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const r = await res.json();
+    return {
+      id: r.trade_id ?? `t${Date.now()}`,
+      marketId,
+      side: side,
+      amount: amount,
+      price: price,
+      pnl: 0,
+      status: 'open',
+      ts: Date.now(),
+      txHash: r.tx_hash || null,
+    };
+  } catch {
+    await sim(400);
+    return {
+      id: `t${Date.now()}`,
+      marketId, side, amount, price,
+      pnl: 0,
+      status: 'open',
+      ts: Date.now(),
+      txHash: null,
+    };
+  }
 }
 
 // ─── WALLET SUMMARY ──────────────────────────────────────────────────────────
 // Intern 5: replace with → fetch(`${BASE}/wallet/summary`)
 
 export async function getWallet() {
-  // LIVE: return fetch(`${BASE}/wallet/summary`).then(r => r.json());
-  await sim(400);
-  return MOCK_WALLET;
+  try {
+    const wallet = getStoredWallet();
+    if (!wallet) return { balance: 0, pnl: 0, pnlPct: 0, trades: 0 };
+    const res = await fetch(`${BASE}/api/wallet/summary?wallet_address=${encodeURIComponent(wallet)}`);
+    const w = await res.json();
+    return {
+      balance: w.paper_balance ?? 0,
+      pnl: w.net_pnl ?? 0,
+      pnlPct: 0,
+      trades: w.total_trades ?? 0,
+    };
+  } catch {
+    return MOCK_WALLET;
+  }
 }
 
 // ─── MY TRADES ───────────────────────────────────────────────────────────────
 // Intern 5: replace with → fetch(`${BASE}/trades`)
 
 export async function getTrades() {
-  // LIVE: return fetch(`${BASE}/trades`).then(r => r.json());
-  await sim(400);
-  return MOCK_TRADES;
+  try {
+    const wallet = getStoredWallet();
+    if (!wallet) return [];
+    const res = await fetch(`${BASE}/api/wallet/summary?wallet_address=${encodeURIComponent(wallet)}`);
+    const w = await res.json();
+    const trades = (w.trades || []).map(t => ({
+      id: t.id,
+      q: t.market_question,
+      side: (t.outcome || 'YES').toLowerCase(),
+      amount: Math.round((t.total_cost || 0) * 100) / 100,
+      price: t.price_per_share || 0,
+      status: (t.status || 'OPEN').toLowerCase(),
+      pnl: t.pnl || 0,
+      txHash: t.tx_hash || null,
+    }));
+    return trades;
+  } catch {
+    return MOCK_TRADES;
+  }
+}
+
+export async function commitTrade(tradeId) {
+  try {
+    const res = await fetch(`${BASE}/api/trade/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trade_id: tradeId }),
+    });
+    const r = await res.json();
+    return { ok: true, txHash: r.tx_hash || null };
+  } catch {
+    return { ok: false };
+  }
 }

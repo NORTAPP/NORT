@@ -1,15 +1,36 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { paperTrade } from '@/lib/api';
 import { useTelegram } from '@/hooks/useTelegram';
+import { useAuth } from '@/hooks/useAuth';
+import LoginPrompt from './LoginPrompt';
 
 export default function TradeModal({ signal, initialSide = 'yes', onClose, onSuccess }) {
   const { haptic } = useTelegram();
+  const { ready, isAuthed, walletAddress, login } = useAuth();
   const [side, setSide]       = useState(initialSide);
   const [amount, setAmount]   = useState('');
   const [loading, setLoading] = useState(false);
 
   if (!signal) return null;
+
+  if (!ready) {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-handle" />
+          <div className="modal-title">Loading...</div>
+          <div className="modal-sub">Please wait</div>
+        </div>
+      </div>
+    );
+  }
+
+  const needsWallet = !walletAddress;
+
+  if (!isAuthed || needsWallet) {
+    return <LoginPrompt onLogin={login} onClose={onClose} message={needsWallet ? "Connect your wallet to place trades" : "Connect your wallet to continue"} />;
+  }
 
   const price   = side === 'yes' ? signal.yes / 100 : (100 - signal.yes) / 100;
   const shares  = amount ? (parseFloat(amount) / price).toFixed(1) : '—';

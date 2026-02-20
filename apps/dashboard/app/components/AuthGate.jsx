@@ -1,10 +1,14 @@
 'use client';
 import { useAuth } from '@/hooks/useAuth';
+import { useTelegram } from '@/hooks/useTelegram';
 
 export default function AuthGate({ children }) {
   const { ready, isAuthed, login } = useAuth();
+  const { user: tgUser, ready: tgReady } = useTelegram();
 
-  if (!ready) {
+  const isReady = ready && tgReady;
+
+  if (!isReady) {
     return (
       <div className="auth-screen">
         <div className="auth-logo">NORT</div>
@@ -13,7 +17,7 @@ export default function AuthGate({ children }) {
     );
   }
 
-  if (!isAuthed) {
+  if (!isAuthed && !tgUser) {
     return (
       <div className="auth-screen">
         <div className="auth-logo">NORT</div>
@@ -21,10 +25,6 @@ export default function AuthGate({ children }) {
           AI-powered prediction market signals.<br />
           Connect your wallet to start trading.
         </div>
-        <button className="auth-btn" onClick={login}>
-          Connect with Telegram
-        </button>
-        <div className="auth-divider">or</div>
         <button className="auth-btn outline" onClick={login}>
           Connect Wallet
         </button>

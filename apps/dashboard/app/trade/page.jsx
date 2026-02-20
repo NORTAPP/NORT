@@ -1,7 +1,7 @@
 'use client';
 import React from 'react';
 import { useState, useEffect } from 'react';
-import { getTrades, getWallet } from '@/lib/api';
+import { getTrades, getWallet, commitTrade } from '@/lib/api';
 import AuthGate from '@/components/AuthGate';
 import Navbar from '@/components/Navbar';
 
@@ -15,6 +15,13 @@ export default function BetsPage() {
       .then(([t, w]) => { setTrades(t); setWallet(w); })
       .finally(() => setLoading(false));
   }, []);
+  const onCommit = async (id) => {
+    const r = await commitTrade(id);
+    if (r.ok) {
+      const t = await getTrades();
+      setTrades(t);
+    }
+  };
 
   const fmt = (n) => (n >= 0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`);
   const pnlClass = (n) => (n > 0 ? 'pos' : n < 0 ? 'neg' : 'flat');
@@ -82,6 +89,15 @@ export default function BetsPage() {
                   <div className={`trade-pnl ${pnlClass(t.pnl)}`}>
                     {t.pnl !== 0 ? fmt(t.pnl) : '—'}
                   </div>
+                  {t.status === 'open' && !t.txHash ? (
+                    <button
+                      onClick={() => onCommit(t.id)}
+                      style={{ marginLeft: 8 }}
+                      className="chip-btn"
+                    >
+                      Commit
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>

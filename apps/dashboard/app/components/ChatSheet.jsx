@@ -2,6 +2,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { getAdvice, getPremiumAdvice, verifyPayment } from '@/lib/api';
 import { useTelegram } from '@/hooks/useTelegram';
+import { useAuth } from '@/hooks/useAuth';
+import LoginPrompt from './LoginPrompt';
 
 const INIT_MSG = {
   id: 'init',
@@ -11,6 +13,7 @@ const INIT_MSG = {
 
 export default function ChatSheet({ signal, onClose }) {
   const { haptic } = useTelegram();
+  const { isAuthed, walletAddress, login } = useAuth();
   const [messages, setMessages]     = useState([INIT_MSG]);
   const [input, setInput]           = useState('');
   const [thinking, setThinking]     = useState(false);
@@ -22,6 +25,10 @@ export default function ChatSheet({ signal, onClose }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, thinking]);
+
+  if (!isAuthed || !walletAddress) {
+    return <LoginPrompt onLogin={login} onClose={onClose} message="Connect your wallet to chat with AI" />;
+  }
 
   const addMsg = (role, text) => {
     setMessages(prev => [...prev, { id: Date.now(), role, text }]);
@@ -71,7 +78,6 @@ export default function ChatSheet({ signal, onClose }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="chat-sheet" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
         <div className="chat-header">
           <div className="chat-title">
             <span className="ai-dot" />
@@ -81,7 +87,6 @@ export default function ChatSheet({ signal, onClose }) {
           <button className="chat-close" onClick={onClose}>✕</button>
         </div>
 
-        {/* Messages */}
         <div className="chat-messages">
           {messages.map(m => (
             <div key={m.id} className={`msg ${m.role}`} style={{ whiteSpace: 'pre-line' }}>
@@ -89,7 +94,6 @@ export default function ChatSheet({ signal, onClose }) {
             </div>
           ))}
 
-          {/* Payment gate */}
           {gated && (
             <div className="premium-gate">
               <div className="gate-label">PREMIUM · 0.10 USDC</div>
@@ -109,7 +113,6 @@ export default function ChatSheet({ signal, onClose }) {
             </div>
           )}
 
-          {/* Thinking indicator */}
           {thinking && (
             <div className="msg-thinking">
               <span className="td" /><span className="td" /><span className="td" />
@@ -118,7 +121,6 @@ export default function ChatSheet({ signal, onClose }) {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input row */}
         {!gated && (
           <div className="chat-input-row">
             <input

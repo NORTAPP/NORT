@@ -71,8 +71,8 @@ export function useTelegram() {
   const openDashboard = () => {
     const fallback =
       typeof window !== 'undefined'
-        ? `${window.location.origin}/trade`
-        : '/trade';
+        ? `${window.location.origin}/markets`
+        : '/markets';
     const url = process.env.NEXT_PUBLIC_DASHBOARD_URL || fallback;
     openLink(url);
   };

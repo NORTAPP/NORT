@@ -1,6 +1,7 @@
 'use client';
 import React from 'react';
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { getSignals } from '@/lib/api';
 import { useTelegram } from '@/hooks/useTelegram';
 import AuthGate from '@/components/AuthGate';
@@ -63,7 +64,7 @@ export default function FeedPage() {
               </svg>
               Dashboard
             </button>
-            <div className="user-av">{initials}</div>
+            <Link href="/profile" className="user-av">{initials}</Link>
           </div>
         </div>
 
