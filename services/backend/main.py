@@ -31,10 +31,8 @@ app.add_middleware(
 app.include_router(signals_router, prefix="/api")
 app.include_router(wallet_router, prefix="/api")
 app.include_router(trades_router, prefix="/api")
-
 app.include_router(markets_router)
-
-app.include_router(signals_router)
+app.include_router(signals_router)   # also mount without prefix so /signals/ works
 app.include_router(advice_router)
 
 @app.get("/")
