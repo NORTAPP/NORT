@@ -8,15 +8,18 @@ from sqlmodel import Session, select
 from typing import List
 from datetime import datetime
 
+#database connection
 from services.backend.data.database import engine
+
 from services.backend.data.models import Market, AISignal
 from services.backend.core.signals_engine import rank_markets
 
+#fastApi router
 router = APIRouter(prefix="/signals", tags=["Signals"])
 
 
 # ─────────────────────────────────────────────
-# HELPER: convert Market DB rows → plain dicts
+# HELPER: convert Market DB rows → plain dicts since signals_engine.py works with plain python dictionaries
 # signals_engine.py works with plain dicts,
 # not SQLModel objects — this bridges the gap.
 # ─────────────────────────────────────────────
