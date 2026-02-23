@@ -1,15 +1,15 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useTelegram } from "./useTelegram";
 
 export function useRealAuth() {
   const { ready: privyReady, authenticated, user, login: privyLogin, logout: privyLogout } = usePrivy();
-  const { wallets } = useWallets();
   const { user: tgUser } = useTelegram();
-  const [lsWallet, setLsWallet] = useState(null);
   const [initialized, setInitialized] = useState(false);
   const [forceLoggedOut, setForceLoggedOut] = useState(false);
+  const logoutInProgress = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -62,11 +62,13 @@ export function useRealAuth() {
       window.location.replace(window.location.origin + "/");
     }
   };
+  // End of logout function
 
   return {
     ready: !!privyReady && initialized,
     isAuthed,
     user: user || null,
+    user,
     walletAddress,
     login: privyLogin,
     logout,
