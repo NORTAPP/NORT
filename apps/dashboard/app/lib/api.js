@@ -341,8 +341,6 @@ export async function commitTrade(tradeId) {
     return { ok: false };
   }
 }
-<<<<<<< HEAD
-=======
 
 // ─── LEADERBOARD ─────────────────────────────────────────────────────────────
 export const MOCK_USER_STATS = {
@@ -481,4 +479,3 @@ export async function getAchievements() {
     });
   } catch { return ACHIEVEMENTS_DATA; }
 }
->>>>>>> feat/dashboard
