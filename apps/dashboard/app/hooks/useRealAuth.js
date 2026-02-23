@@ -1,72 +1,79 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useTelegram } from "./useTelegram";
 
 export function useRealAuth() {
-  const { ready: privyReady, authenticated, user, login: privyLogin, logout: privyLogout } = usePrivy();
+  const { ready: privyReady, authenticated, user: privyUser, login: privyLogin, logout: privyLogout } = usePrivy();
   const { wallets } = useWallets();
   const { user: tgUser } = useTelegram();
   const [lsWallet, setLsWallet] = useState(null);
   const [initialized, setInitialized] = useState(false);
-  const [forceLoggedOut, setForceLoggedOut] = useState(false);
+  const logoutInProgress = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const w = window.localStorage.getItem("walletAddress");
-    const forceOut = window.localStorage.getItem("force_logout");
     if (w) setLsWallet(w);
-    if (forceOut === "true") {
-      setForceLoggedOut(true);
-      window.localStorage.removeItem("force_logout");
-    }
     setInitialized(true);
   }, []);
 
-  // Clear session on tab close / page hide
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleUnload = () => {
-      try {
-        window.localStorage.removeItem("walletAddress");
-        window.localStorage.removeItem("nort_auth");
-      } catch {}
-    };
-    window.addEventListener("beforeunload", handleUnload);
-    return () => window.removeEventListener("beforeunload", handleUnload);
-  }, []);
+  // Get wallet address - prefer connected wallet, fallback to localStorage
+  const walletAddress = wallets?.[0]?.address || lsWallet || null;
+  
+  // Build combined user object
+  const user = privyUser || (tgUser ? {
+    id: tgUser.id?.toString(),
+    firstName: tgUser.first_name,
+    name: tgUser.first_name,
+    displayName: tgUser.first_name,
+    email: null,
+    telegram: tgUser
+  } : null);
+  
+  // Force not authenticated if logout is in progress
+  const isAuthed = !logoutInProgress.current && !!privyReady && initialized && (!!authenticated || !!walletAddress);
 
-  const walletAddress = forceLoggedOut ? null : (wallets?.[0]?.address || lsWallet || null);
-  const isAuthed = !!privyReady && initialized && !forceLoggedOut && (!!authenticated || !!walletAddress);
-
-  const logout = async () => {
-    console.log("[Auth] logout called");
-    // Clear local storage first
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("walletAddress");
-        localStorage.removeItem("nort_auth");
-      }
-    } catch(e) {
-      console.warn("[Auth] localStorage error:", e);
+  const logout = () => {
+    if (logoutInProgress.current) {
+      console.log("[Auth] Logout already in progress");
+      return;
     }
-    // Await Privy logout before redirecting
-    try {
-      await privyLogout();
-      console.log("[Auth] privyLogout complete");
-    } catch(e) {
-      console.warn("[Auth] privyLogout error:", e);
-    }
-    // Hard redirect after logout is confirmed
+    
+    logoutInProgress.current = true;
+    console.log("[Auth] Starting logout, redirecting to login...");
+    
+    // Clear ALL local storage
     if (typeof window !== "undefined") {
-      window.location.replace(window.location.origin + "/");
+      try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (key && (key.includes('privy') || key.includes('wallet') || key.includes('auth') || key.includes('nort'))) {
+            localStorage.removeItem(key);
+          }
+        }
+      } catch (e) {
+        console.log("[Auth] localStorage clear error:", e);
+      }
+    }
+    
+    // Try Privy logout
+    try {
+      privyLogout();
+    } catch (e) {
+      // Ignore errors
+    }
+    
+    // Immediate redirect to home (which shows login)
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
     }
   };
 
   return {
     ready: !!privyReady && initialized,
     isAuthed,
-    user: user || null,
+    user,
     walletAddress,
     login: privyLogin,
     logout,
