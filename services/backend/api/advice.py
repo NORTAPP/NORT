@@ -3,7 +3,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 # Prompt
 from services.agent.prompt_templates import ADVICE_SYSTEM_PROMPT, build_advice_user_prompt
