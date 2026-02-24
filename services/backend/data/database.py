@@ -8,38 +8,51 @@ from services.backend.data.models import (
 )
 
 # ─────────────────────────────────────────────
-# DATABASE URL
-# Locally:   uses SQLite (no setup needed)
-# On Render: uses Neon PostgreSQL (set DATABASE_URL in Render env vars)
+# DATABASE URL RESOLUTION
 # ─────────────────────────────────────────────
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+def _build_database_url() -> str:
+    url = os.getenv("DATABASE_URL", "").strip()
 
-if DATABASE_URL:
-    # Neon / PostgreSQL — used on Render
-    # Neon connection strings sometimes use "postgres://" (old format)
-    # SQLAlchemy requires "postgresql://" so we fix it here
-    if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    if url:
+        # Fix legacy postgres:// prefix — SQLAlchemy needs postgresql://
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
 
+        # psycopg2-binary does not support channel_binding — strip it out
+        url = url.replace("&channel_binding=require", "")
+        url = url.replace("channel_binding=require&", "")
+        url = url.replace("?channel_binding=require", "")
+
+        print("Database: Neon PostgreSQL")
+        return url
+
+    # Local fallback — SQLite
+    base_dir = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    )
+    db_path = os.path.join(base_dir, "data", "assistant.db")
+    print(f"Database: SQLite at {os.path.abspath(db_path)}")
+    return f"sqlite:///{db_path}"
+
+
+DATABASE_URL = _build_database_url()
+
+# ─────────────────────────────────────────────
+# ENGINE
+# ─────────────────────────────────────────────
+
+if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
-        echo=False,  # Set True temporarily if you need to debug queries
-    )
-    print("Database: Neon PostgreSQL")
-
-else:
-    # Local development — SQLite fallback
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-    DB_PATH  = os.path.join(BASE_DIR, "data", "assistant.db")
-    sqlite_url = f"sqlite:///{DB_PATH}"
-
-    engine = create_engine(
-        sqlite_url,
         connect_args={"check_same_thread": False},
         echo=True,
     )
-    print(f"Database: SQLite at {os.path.abspath(DB_PATH)}")
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        echo=False,
+    )
 
 
 def init_db():

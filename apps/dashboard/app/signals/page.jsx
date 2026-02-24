@@ -11,12 +11,15 @@ const FILTERS = ['all', 'hot', 'warm', 'cool'];
 export default function SignalsPage() {
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
+  const [error, setError]     = useState(null);
+  const [filter, setFilter]   = useState('all');
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     getSignals(filter)
       .then(setSignals)
+      .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [filter]);
 
@@ -32,6 +35,7 @@ export default function SignalsPage() {
             </div>
           </div>
         </div>
+
         <div className="scroll">
           <div className="filter-row fu d1">
             {FILTERS.map(f => (
@@ -47,6 +51,11 @@ export default function SignalsPage() {
 
           {loading ? (
             [1, 2, 3].map(i => <SkeletonCard key={i} />)
+          ) : error ? (
+            <div className="empty fu d2">
+              <div className="empty-icon">!</div>
+              <div className="empty-text">Failed to load signals: {error}</div>
+            </div>
           ) : signals.length === 0 ? (
             <div className="empty fu d2">
               <div className="empty-icon">◇</div>

@@ -6,7 +6,6 @@ import { getLeaderboard, getMyRank } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 
 const RANK_COLORS = ['#f59e0b', '#a0a0a0', '#b45309'];
-const RANK_LABELS = ['gold', 'silver', 'bronze'];
 
 function PodiumCard({ entry, pos }) {
   return (
@@ -33,28 +32,33 @@ function BadgePill({ badge }) {
 
 function StreakFlame({ streak }) {
   if (!streak) return <span style={{ color: 'var(--g3)', fontFamily: 'DM Mono, monospace', fontSize: 11 }}>--</span>;
-  return <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: '#f59e0b' }}>x{streak}</span>;
+  return <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 11, color: '#f59e0b' }}>🔥 x{streak}</span>;
 }
 
 export default function LeaderboardPage() {
   const { walletAddress } = useAuth();
-  const [board, setBoard] = useState([]);
+  const [board, setBoard]   = useState([]);
   const [myRank, setMyRank] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError]   = useState(null);
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     Promise.all([
       getLeaderboard(50),
       walletAddress ? getMyRank(walletAddress) : Promise.resolve(null),
-    ]).then(([lb, me]) => {
-      setBoard(lb);
-      setMyRank(me);
-    }).finally(() => setLoading(false));
+    ])
+      .then(([lb, me]) => {
+        setBoard(lb);
+        setMyRank(me);
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
   }, [walletAddress]);
 
   const top3 = board.slice(0, 3);
-  const rest  = board.slice(3);
+  const rest = board.slice(3);
 
   return (
     <AuthGate>
@@ -70,10 +74,11 @@ export default function LeaderboardPage() {
           <div className="page-header">
             <div>
               <div className="page-title">Paper Trading Ranks</div>
-              <div className="page-meta">{board.length} traders - ranked by portfolio value</div>
+              <div className="page-meta">{board.length} traders — ranked by portfolio value</div>
             </div>
           </div>
 
+          {/* My rank card — only shown if user has traded */}
           {myRank && (
             <div className="my-rank-card fu d1">
               <div className="my-rank-left">
@@ -88,7 +93,7 @@ export default function LeaderboardPage() {
                   <div className="my-stat-val" style={{ color: myRank.net_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
                     {myRank.net_pnl >= 0 ? '+' : ''}${myRank.net_pnl.toFixed(2)}
                   </div>
-                  <div className="my-stat-label">P&L</div>
+                  <div className="my-stat-label">P&amp;L</div>
                 </div>
                 <div className="my-stat">
                   <div className="my-stat-val">{myRank.win_rate}%</div>
@@ -112,35 +117,51 @@ export default function LeaderboardPage() {
             </div>
           )}
 
-          {!loading && top3.length === 3 && (
-            <div className="podium-wrap fu d2">
-              {top3.map((entry, i) => (
-                <PodiumCard key={entry.telegram_user_id} entry={entry} pos={i} />
+          {error ? (
+            <div className="empty fu d2">
+              <div className="empty-icon">!</div>
+              <div className="empty-text">Failed to load leaderboard: {error}</div>
+            </div>
+          ) : loading ? (
+            <div className="lb-table fu d3">
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} className="lb-row skeleton-row">
+                  <div className="skel-line w40" style={{ height: 10, borderRadius: 4 }} />
+                  <div className="skel-line w70" style={{ height: 10, borderRadius: 4 }} />
+                  <div className="skel-line w40" style={{ height: 10, borderRadius: 4 }} />
+                </div>
               ))}
             </div>
-          )}
-
-          <div className="lb-table fu d3">
-            <div className="lb-table-header">
-              <span>#</span>
-              <span>Trader</span>
-              <span className="lb-hide-sm">Trades</span>
-              <span className="lb-hide-sm">Win Rate</span>
-              <span className="lb-hide-sm">Streak</span>
-              <span>P&L</span>
-              <span>Portfolio</span>
+          ) : board.length === 0 ? (
+            <div className="empty fu d2">
+              <div className="empty-icon">🏆</div>
+              <div className="empty-text">No traders yet. Place the first paper trade!</div>
             </div>
+          ) : (
+            <>
+              {top3.length === 3 && (
+                <div className="podium-wrap fu d2">
+                  {top3.map((entry, i) => (
+                    <PodiumCard key={entry.telegram_user_id} entry={entry} pos={i} />
+                  ))}
+                </div>
+              )}
 
-            {loading
-              ? [1, 2, 3, 4, 5].map(i => (
-                  <div key={i} className="lb-row skeleton-row">
-                    <div className="skel-line w40" style={{ height: 10, borderRadius: 4 }} />
-                    <div className="skel-line w70" style={{ height: 10, borderRadius: 4 }} />
-                    <div className="skel-line w40" style={{ height: 10, borderRadius: 4 }} />
-                  </div>
-                ))
-              : rest.map(entry => (
-                  <div key={entry.telegram_user_id} className={'lb-row' + (myRank && myRank.telegram_user_id === entry.telegram_user_id ? ' lb-row-me' : '')}>
+              <div className="lb-table fu d3">
+                <div className="lb-table-header">
+                  <span>#</span>
+                  <span>Trader</span>
+                  <span className="lb-hide-sm">Trades</span>
+                  <span className="lb-hide-sm">Win Rate</span>
+                  <span className="lb-hide-sm">Streak</span>
+                  <span>P&amp;L</span>
+                  <span>Portfolio</span>
+                </div>
+                {rest.map(entry => (
+                  <div
+                    key={entry.telegram_user_id}
+                    className={'lb-row' + (myRank?.telegram_user_id === entry.telegram_user_id ? ' lb-row-me' : '')}
+                  >
                     <span className="lb-rank">{entry.rank}</span>
                     <span className="lb-trader">
                       <BadgePill badge={entry.badge} />
@@ -154,15 +175,9 @@ export default function LeaderboardPage() {
                     </span>
                     <span className="lb-mono">${entry.portfolio_value.toFixed(0)}</span>
                   </div>
-                ))
-            }
-          </div>
-
-          {!loading && board.length === 0 && (
-            <div className="empty">
-              <div className="empty-icon">trophy</div>
-              <div className="empty-text">No traders yet. Be the first!</div>
-            </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
 
