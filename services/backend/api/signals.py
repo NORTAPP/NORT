@@ -15,7 +15,7 @@ from services.backend.data.models import Market, AISignal
 from services.backend.core.signals_engine import rank_markets
 
 #fastApi router
-router = APIRouter(prefix="/signals", tags=["Signals"])
+router = APIRouter(prefix="/signals", tags=["Signals"], redirect_slashes=False)
 
 
 # ─────────────────────────────────────────────

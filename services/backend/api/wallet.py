@@ -25,7 +25,7 @@ from services.backend.core.paper_trading import (
     get_wallet_summary,
 )
 
-router = APIRouter(tags=["Wallet"])
+router = APIRouter(tags=["Wallet"], redirect_slashes=False)
 
 
 class WalletConnectRequest(BaseModel):

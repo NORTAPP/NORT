@@ -21,7 +21,7 @@ from services.backend.core.leaderboard import (
     get_achievements,
 )
 
-router = APIRouter(tags=["Leaderboard"])
+router = APIRouter(tags=["Leaderboard"], redirect_slashes=False)
 
 
 # ─────────────────────────────────────────────
