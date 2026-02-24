@@ -14,7 +14,7 @@ from services.agent.prompt_templates import (
     PREMIUM_ADVICE_USER_PROMPT,
 )
 
-router = APIRouter(prefix="/agent", tags=["Agent"])
+router = APIRouter(prefix="/agent", tags=["Agent"], redirect_slashes=False)
 
 OPENCLAW_URL = "http://192.168.100.15:18789/api/agent/turn"
 

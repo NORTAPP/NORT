@@ -14,7 +14,7 @@ from services.backend.core.polymarket import fetch_markets, parse_market
 import httpx
 import os
 
-router = APIRouter(prefix="/markets", tags=["Markets"])
+router = APIRouter(prefix="/markets", tags=["Markets"], redirect_slashes=False)
 
 # How old cache can be before we re-fetch from Polymarket
 CACHE_TTL_MINUTES = 5

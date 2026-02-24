@@ -4,7 +4,7 @@
 // NEXT_PUBLIC_API_URL must be set on Vercel to point at the backend.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '');
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ const getStoredWallet = () => {
 // ─── SIGNALS ─────────────────────────────────────────────────────────────────
 
 export async function getSignals(filter = 'all') {
-  const res = await fetch(`${BASE}/signals/?top=20`);
+  const res = await fetch(`${BASE}/signals?top=20`);
   if (!res.ok) throw new Error(`Signals fetch failed: ${res.status}`);
   const data = await res.json();
 
