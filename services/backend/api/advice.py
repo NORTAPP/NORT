@@ -8,7 +8,7 @@ from ddgs import DDGS
 # Prompt
 from services.agent.prompt_templates import ADVICE_SYSTEM_PROMPT, build_advice_user_prompt
 
-router = APIRouter(prefix="/agent", tags=["Agent"])
+router = APIRouter(prefix="/agent", tags=["Agent"], redirect_slashes=False)
 
 # OpenClaw gateway
 OPENCLAW_URL = "https://openrouter.ai/api/v1/chat/completions"

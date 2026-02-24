@@ -7,6 +7,11 @@ from services.backend.data.database import engine
 from services.backend.data.models import AISignal
 
 router = APIRouter(prefix="/signals", tags=["Signals"])
+from services.backend.data.models import Market, AISignal
+from services.backend.core.signals_engine import rank_markets
+
+#fastApi router
+router = APIRouter(prefix="/signals", tags=["Signals"], redirect_slashes=False)
 
 @router.get("/")
 def get_top_signals(top: int = 20):

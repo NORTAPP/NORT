@@ -5,54 +5,89 @@ import { useTelegram } from "./useTelegram";
 
 export function useRealAuth() {
   const { ready: privyReady, authenticated, user, login: privyLogin, logout: privyLogout } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useWallets(); // correct destructure — returns { wallets: [] }
   const { user: tgUser } = useTelegram();
-  const [lsWallet, setLsWallet] = useState(null);
-  const [initialized, setInitialized] = useState(false);
-  const [forceLoggedOut, setForceLoggedOut] = useState(false);
 
+  const [initialized, setInitialized] = useState(false);
+  const [lsWallet, setLsWallet]       = useState(null);
+
+  // On mount: load persisted wallet from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const w = window.localStorage.getItem("walletAddress");
-    const forceOut = window.localStorage.getItem("force_logout");
-    if (w) setLsWallet(w);
-    if (forceOut === "true") {
-      setForceLoggedOut(true);
-      window.localStorage.removeItem("force_logout");
-    }
+    const stored = window.localStorage.getItem("walletAddress");
+    if (stored) setLsWallet(stored);
     setInitialized(true);
   }, []);
 
-  const walletAddress = forceLoggedOut ? null : (wallets?.[0]?.address || lsWallet || null);
+  // Persist wallet address whenever Privy gives us one
+  useEffect(() => {
+    if (!wallets || wallets.length === 0) return;
+    const addr = wallets[0]?.address;
+    if (!addr) return;
+    try {
+      window.localStorage.setItem("walletAddress", addr);
+      setLsWallet(addr);
+    } catch {}
+  }, [wallets]);
 
-  const isAuthed = !!privyReady && initialized && !forceLoggedOut && (!!authenticated || !!walletAddress);
+  // Clear on page unload so sessions don't leak between users
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleUnload = () => {
+      try {
+        window.localStorage.removeItem("walletAddress");
+      } catch {}
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
+  }, []);
+
+  // Best wallet address: prefer live Privy wallet, fall back to localStorage
+  const privyWalletAddress = wallets?.[0]?.address || null;
+  const walletAddress = privyWalletAddress || lsWallet || null;
+
+  const isAuthed = !!privyReady && initialized && (!!authenticated || !!walletAddress || !!tgUser);
 
   const logout = async () => {
-    console.log("[Auth] logout called");
     try {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("walletAddress");
-        localStorage.removeItem("nort_auth");
-        localStorage.setItem("force_logout", "true");
-        console.log("[Auth] localStorage cleared");
-      }
-    } catch(e) {
-      console.log("[Auth] localStorage error:", e);
+      window.localStorage.removeItem("walletAddress");
+      window.localStorage.removeItem("nort_auth");
+    } catch {}
+    try { await privyLogout(); } catch {}
+    if (typeof window !== "undefined") {
+      window.location.replace(window.location.origin + "/");
     }
-    try {
-      await privyLogout();
-    } catch(e) {
-      console.log("[Auth] privyLogout error:", e);
-    }
-    window.location.replace(window.location.origin + "/?t=" + Date.now());
   };
 
+  // Build a consistent user object regardless of login method
+  const combinedUser = user
+    ? {
+        id:           user.id,
+        firstName:    user.google?.name?.split(" ")[0]
+                      || user.email?.address?.split("@")[0]
+                      || "User",
+        name:         user.google?.name || user.email?.address || "User",
+        displayName:  user.google?.name || user.email?.address || "User",
+        email:        user.email?.address || user.google?.email || null,
+        walletAddress,
+      }
+    : tgUser
+    ? {
+        id:           tgUser.id?.toString(),
+        firstName:    tgUser.first_name,
+        name:         tgUser.first_name,
+        displayName:  tgUser.first_name,
+        email:        null,
+        walletAddress,
+      }
+    : null;
+
   return {
-    ready: !!privyReady && initialized,
+    ready:         !!privyReady && initialized,
     isAuthed,
-    user: user || null,
+    user:          combinedUser,
     walletAddress,
-    login: privyLogin,
+    login:         privyLogin,
     logout,
   };
 }
