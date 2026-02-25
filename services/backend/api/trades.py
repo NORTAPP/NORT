@@ -14,7 +14,7 @@ from sqlmodel import Session
 from services.backend.data.database import get_session
 from services.backend.core.paper_trading import place_paper_trade, commit_trade_to_testnet
 
-router = APIRouter(tags=["Paper Trading"])
+router = APIRouter(tags=["Paper Trading"], redirect_slashes=False)
 
 
 class PaperTradeRequest(BaseModel):
