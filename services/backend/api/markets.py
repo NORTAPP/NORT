@@ -140,9 +140,16 @@ def refresh_markets():
 # ─────────────────────────────────────────────
 
 def market_to_response(market: Market) -> dict:
-    # Short summary format for Telegram
-    line = f"`{market.id[:8]}` {market.question[:80]}...\n"
-    line += f"Yes: ${market.current_odds:.0%} | Vol: ${market.volume:,.0f}"
-    return {"summary": line}
+    return {
+        "id":            market.id,
+        "question":      market.question,
+        "category":      market.category,
+        "current_odds":  market.current_odds,
+        "previous_odds": market.previous_odds,
+        "volume":        market.volume,
+        "avg_volume":    market.avg_volume,
+        "is_active":     market.is_active,
+        "expires_at":    str(market.expires_at),
+    }
 
 
