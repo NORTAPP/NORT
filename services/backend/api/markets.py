@@ -5,9 +5,8 @@
 
 from fastapi import APIRouter, HTTPException
 from sqlmodel import Session, select
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List
-from sqlalchemy.orm import Session
 
 from services.backend.data.database import engine
 from services.backend.data.models import Market
@@ -27,11 +26,9 @@ CACHE_TTL_MINUTES = 5
 
 def cache_is_fresh(session: Session) -> bool:
     try:
-        # SQLModel/SQLAlchemy 2.0 syntax
-        statement = select(Market).order_by(Market.expires_at.desc()).limit(1)
-        result = session.execute(statement)
-        latest = result.scalar_one_or_none()
-        return latest is not None
+        statement = select(Market).limit(1)
+        result = session.exec(statement).first()
+        return result is not None
     except:
         return False  # Any DB error = cache stale
 
@@ -96,8 +93,6 @@ def sync_markets(session: Session):
 # ─────────────────────────────────────────────
 
 # Remove duplicate @router.get("/markets") at bottom - KEEP ONLY THIS:
-
-@router.get("/")  # This becomes /markets/
 
 @router.get("/")
 def get_markets():
