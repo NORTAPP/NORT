@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 from datetime import datetime, timedelta
 
 # Prompt
