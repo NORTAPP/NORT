@@ -6,20 +6,28 @@ import Navbar from '@/components/Navbar';
 import AuthGate from '@/components/AuthGate';
 
 export default function MarketsPage() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems]       = useState([]);
+  const [loading, setLoading]   = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError]       = useState(null);
 
   const load = () => {
     setLoading(true);
-    listMarkets().then(setItems).finally(() => setLoading(false));
+    setError(null);
+    listMarkets()
+      .then(setItems)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
   };
+
   useEffect(load, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
     try {
       await refreshMarkets();
+    } catch (e) {
+      setError(e.message);
     } finally {
       setRefreshing(false);
       load();
@@ -41,18 +49,27 @@ export default function MarketsPage() {
             </button>
           </div>
         </div>
+
         <div className="scroll">
           {loading ? (
             <div className="empty">
               <div className="empty-icon">⟳</div>
               <div className="empty-text">Loading markets...</div>
             </div>
+          ) : error ? (
+            <div className="empty">
+              <div className="empty-icon">!</div>
+              <div className="empty-text">Failed to load markets: {error}</div>
+              <button onClick={onRefresh} className="chip-btn" style={{ marginTop: 12 }}>
+                Retry
+              </button>
+            </div>
           ) : items.length === 0 ? (
             <div className="empty">
               <div className="empty-icon">◇</div>
               <div className="empty-text">No markets available.</div>
               <button onClick={onRefresh} className="chip-btn" style={{ marginTop: 12 }}>
-                Try Refresh
+                Refresh from Polymarket
               </button>
             </div>
           ) : (
@@ -64,7 +81,7 @@ export default function MarketsPage() {
                     <div className="scard-inner">
                       <div className="scard-meta">
                         <span className="scard-cat">{m.cat || 'General'}</span>
-                        <span className="scard-heat">${m.vol}</span>
+                        <span className="scard-heat">{m.vol}</span>
                       </div>
                       <div className="scard-q">{m.q}</div>
                       <div className="odds-wrap">

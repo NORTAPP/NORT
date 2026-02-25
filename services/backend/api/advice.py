@@ -1,9 +1,11 @@
 import json
 import httpx
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from ddgs import DDGS
+from datetime import datetime, timedelta
 
 # Prompt
 from services.agent.prompt_templates import ADVICE_SYSTEM_PROMPT, build_advice_user_prompt
@@ -13,6 +15,27 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 # OpenClaw gateway
 OPENCLAW_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENCLAW_TOKEN = "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"
+
+# ─────────────────────────────────────────────────────────────
+# x402 PAYMENT CACHE (NEW)
+# ─────────────────────────────────────────────────────────────
+# In production, use Redis or a database instead of in-memory dict
+
+payment_cache = {}
+
+def is_payment_verified(user_id: str) -> bool:
+    """Check if user has recently verified payment"""
+    if user_id not in payment_cache:
+        return False
+    expiry = payment_cache[user_id]
+    if datetime.now() > expiry:
+        del payment_cache[user_id]
+        return False
+    return True
+
+def cache_verified_payment(user_id: str, duration_hours: int = 24):
+    """Cache verified payment for user (duration_hours for re-verification)"""
+    payment_cache[user_id] = datetime.now() + timedelta(hours=duration_hours)
 
 # ─────────────────────────────────────────────────────────────
 # Request / Response Models
@@ -118,8 +141,8 @@ def parse_response(raw: str, market_id: str) -> AdviceResponse:
     if start != -1 and end > start:
         cleaned = cleaned[start:end]
 
-    if cleaned.startswith("```"):
-        parts = cleaned.split("```")
+    if cleaned.startswith(""):
+        parts = cleaned.split("")
         cleaned = parts[1] if len(parts) > 1 else cleaned
         if cleaned.startswith("json"):
             cleaned = cleaned[4:]
@@ -200,11 +223,30 @@ def extract_market_signal(signals_data: dict, market_id: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
-# MAIN ENDPOINT
+# MAIN ENDPOINT (WITH x402 PAYMENT GATE)
 # ─────────────────────────────────────────────────────────────
 
 @router.post("/advice", response_model=AdviceResponse)
 async def get_advice(request: AdviceRequest):
+    # ──────────────────────────────────────────
+    # x402 PAYMENT GATE (NEW)
+    # ──────────────────────────────────────────
+    if request.premium:
+        if not request.telegram_id:
+            raise HTTPException(status_code=400, detail="telegram_id required for premium")
+        
+        if not is_payment_verified(request.telegram_id):
+            # Return 402 Payment Required with x402 payment details
+            return JSONResponse(
+                status_code=402,
+                content={
+                    "amount": 0.05,
+                    "address": "0x...",  # TODO: Replace with your USDC wallet address on Base network
+                    "asset": "USDC"
+                }
+            )
+    # ──────────────────────────────────────────
+    
     # 1. Fetch market data and signals
     market_data = await fetch_market_data(request.market_id)
     signals_data = await fetch_signals()
@@ -244,6 +286,42 @@ Return JSON only. The market_id field must be exactly: {request.market_id}
     raw_response = await call_openclaw(ADVICE_SYSTEM_PROMPT, user_message)
     print(f"RAW RESPONSE: {raw_response}")
     return parse_response(raw_response, request.market_id)
+
+
+# ─────────────────────────────────────────────────────────────
+# x402 PAYMENT VERIFICATION ENDPOINT (NEW)
+# ─────────────────────────────────────────────────────────────
+
+@router.post("/x402/verify")
+async def verify_payment(request: dict):
+    """
+    Verify x402 payment transaction on Base network.
+    
+    Request body:
+    {
+        "proof": "<transaction_hash>",
+        "user_id": "<telegram_user_id>"
+    }
+    """
+    tx_hash = request.get("proof")
+    user_id = request.get("user_id")
+    
+    if not tx_hash or not user_id:
+        raise HTTPException(status_code=400, detail="Missing proof or user_id")
+    
+    print(f"[x402 Verify] TX: {tx_hash}, User: {user_id}")
+    
+    # TODO: Integrate with Base RPC to verify transaction
+    # For now, accept any valid-looking 64-char hex (crude validation)
+    if len(tx_hash) == 64 and all(c in '0123456789abcdefABCDEF' for c in tx_hash):
+        cache_verified_payment(user_id)
+        return {"success": True}
+    
+    return JSONResponse(
+        status_code=400,
+        content={"success": False, "reason": "Invalid transaction hash format"}
+    )
+
 
 @router.get("/markets")
 async def get_markets_mock():
