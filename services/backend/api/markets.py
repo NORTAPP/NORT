@@ -96,24 +96,22 @@ def sync_markets(session: Session):
 
 @router.get("/")
 def get_markets(
-    limit: int = 20,        # ← ADD THIS
-    sort_by: str = "volume" # ← OPTIONAL: volume, avg_volume
+    limit: int = 20,
+    sort_by: str = "volume"
 ):
     with Session(engine) as session:
         if not cache_is_fresh(session):
             print("Cache empty — syncing from Polymarket...")
             sync_markets(session)
 
-        # Add LIMIT and ORDER BY
         statement = select(Market).where(Market.is_active == True)
         if sort_by == "volume":
             statement = statement.order_by(Market.volume.desc())
         elif sort_by == "avg_volume":
             statement = statement.order_by(Market.avg_volume.desc())
-            
-        statement = statement.limit(limit)  # ← CRITICAL FIX
-        
-        markets = session.execute(statement).scalars().all()
+        statement = statement.limit(limit)
+
+        markets = session.exec(statement).all()
         return {
             "markets": [market_to_response(m) for m in markets],
             "count": len(markets),
