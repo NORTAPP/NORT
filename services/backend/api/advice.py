@@ -1,9 +1,10 @@
 import json
 import httpx
+import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 
 # Prompt
 from services.agent.prompt_templates import ADVICE_SYSTEM_PROMPT, build_advice_user_prompt
@@ -12,7 +13,7 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 
 # OpenClaw gateway
 OPENCLAW_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENCLAW_TOKEN = "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"
+OPENCLAW_TOKEN = os.getenv("OPENCLAW_TOKEN", "")
 
 # ─────────────────────────────────────────────────────────────
 # Request / Response Models
@@ -245,13 +246,3 @@ Return JSON only. The market_id field must be exactly: {request.market_id}
     print(f"RAW RESPONSE: {raw_response}")
     return parse_response(raw_response, request.market_id)
 
-@router.get("/markets")
-async def get_markets_mock():
-    return {
-        "markets": [
-            {"id": "521947", "question": "Will Trump deport <250k?", "yes_price": 0.35, "no_price": 0.65, "volume": 125000},
-            {"id": "549869", "question": "Bitcoin $100k by June?", "yes_price": 0.68, "no_price": 0.32, "volume": 89000}
-        ],
-        "count": 2,
-        "cached_at": "2026-02-24T22:00:00Z"
-    }
