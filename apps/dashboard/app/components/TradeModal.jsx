@@ -60,6 +60,7 @@ export default function TradeModal({ signal, initialSide = 'yes', onClose, onSuc
         side,
         amount:   parseFloat(amount),
         price,
+        question: signal.q,   // pass directly — avoids wrong DB lookup
       });
       haptic.success?.();
       onSuccess?.(trade);
