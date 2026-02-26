@@ -1,107 +1,37 @@
 # polymarket.py
-# Fetches SHORT-TERM CRYPTO markets only from the Polymarket Gamma API
-# Filters for: 5-minute, 15-minute, and hourly crypto price markets
+# Fetches crypto markets from the Polymarket Gamma API
 
 import httpx
 import os
 import json
-import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 POLYMARKET_API_URL = os.getenv("POLYMARKET_API_URL", "https://gamma-api.polymarket.com")
 
-# ─────────────────────────────────────────────
-# FILTERS — what counts as a short-term crypto market
-# ─────────────────────────────────────────────
-
-# Keywords that identify short-term crypto markets by question text
-SHORT_TERM_KEYWORDS = [
-    "5 minutes", "5-minute", "5min",
-    "15 minutes", "15-minute", "15min",
-    "1 hour", "1-hour", "hourly", "60 minutes",
-    "next hour", "this hour",
-    "in the next 5", "in the next 15",
-    "today", "tonight", "this week", "end of day",
-    "by midnight", "by eod",
-]
-
-# Crypto tokens we care about
 CRYPTO_KEYWORDS = [
-    "btc", "bitcoin",
-    "eth", "ethereum",
-    "sol", "solana",
-    "bnb", "binance",
-    "xrp", "ripple",
-    "doge", "dogecoin",
-    "avax", "avalanche",
-    "matic", "polygon",
-    "link", "chainlink",
-    "ada", "cardano",
-    "crypto", "coin", "token",
+    "bitcoin", "btc", "ethereum", "eth", "solana", "sol",
+    "ripple", "xrp", "dogecoin", "doge", "binance", "bnb",
+    "avalanche", "avax", "chainlink", "link", "cardano", "ada",
+    "polygon", "matic", "crypto", "cryptocurrency", "defi",
+    "stablecoin", "usdc", "usdt", "coinbase", "blockchain",
 ]
 
-# Accept markets expiring within this many hours (short-term window)
-MAX_DURATION_HOURS = 24
 
-
-def _is_short_term_crypto(item: Dict) -> bool:
-    """
-    Returns True if this is a crypto market expiring within 24 hours
-    OR explicitly mentions a short-term timeframe (5min/15min/1hr).
-    """
+def _is_crypto_market(item: Dict) -> bool:
     question = (item.get("question") or "").lower()
     category = (item.get("category") or "").lower()
     slug     = (item.get("slug") or "").lower()
-    tags     = [t.lower() for t in (item.get("tags") or [])]
-
-    # Must be crypto-related
-    has_crypto = (
-        "crypto" in category
-        or any(kw in question or kw in slug for kw in CRYPTO_KEYWORDS)
-        or any(kw in tag for kw in CRYPTO_KEYWORDS for tag in tags)
-    )
-    if not has_crypto:
-        return False
-
-    # Accept if it mentions an explicit short-term timeframe
-    has_timeframe = any(kw in question for kw in SHORT_TERM_KEYWORDS)
-    if has_timeframe:
+    if "crypto" in category or "bitcoin" in category or "ethereum" in category:
         return True
+    combined = question + " " + slug
+    return any(kw in combined for kw in CRYPTO_KEYWORDS)
 
-    # Accept if it expires within MAX_DURATION_HOURS
-    try:
-        end_str = item.get("endDate") or item.get("end_date_iso") or ""
-        if end_str:
-            end_date = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc)
-            hours_left = (end_date - now).total_seconds() / 3600
-            if 0 < hours_left <= MAX_DURATION_HOURS:
-                return True
-    except Exception:
-        pass
-
-    return False
-
-
-# ─────────────────────────────────────────────
-# FETCH — pull markets from Polymarket API
-# ─────────────────────────────────────────────
 
 def fetch_short_term_crypto_markets(limit: int = 200) -> List[Dict]:
-    """
-    Fetches active markets from Polymarket and filters to
-    short-term crypto markets only (5min / 15min / 1hr).
-
-    Returns a list of parsed market dicts ready to upsert into the DB.
-    """
+    """Fetches active markets from Polymarket and returns crypto-related ones."""
     url = f"{POLYMARKET_API_URL}/markets"
-    params = {
-        "active": "true",
-        "closed": "false",
-        "limit": limit,
-        "tag_slug": "crypto",       # pre-filter by crypto tag on the API side
-    }
+    params = {"active": "true", "closed": "false", "limit": limit}
 
     try:
         with httpx.Client(timeout=15.0) as client:
@@ -112,31 +42,33 @@ def fetch_short_term_crypto_markets(limit: int = 200) -> List[Dict]:
         print(f"[Polymarket] Fetch error: {e}")
         return []
 
-    markets = []
+    # Handle both list and dict wrapper responses
+    if isinstance(raw_markets, dict):
+        raw_markets = raw_markets.get("markets") or raw_markets.get("data") or []
+    if not isinstance(raw_markets, list):
+        print(f"[Polymarket] Unexpected response type: {type(raw_markets)}")
+        return []
+
+    crypto_markets = []
     for item in raw_markets:
         try:
-            if not _is_short_term_crypto(item):
-                continue
-            parsed = parse_market(item)
-            if parsed and parsed["id"]:
-                markets.append(parsed)
+            if _is_crypto_market(item):
+                parsed = parse_market(item)
+                if parsed and parsed["id"]:
+                    crypto_markets.append(parsed)
         except Exception as e:
             print(f"[Polymarket] Skipping {item.get('id')}: {e}")
-            continue
 
-    print(f"[Polymarket] Fetched {len(raw_markets)} markets, kept {len(markets)} short-term crypto.")
-    return markets
+    print(f"[Polymarket] Fetched {len(raw_markets)} total, kept {len(crypto_markets)} crypto markets.")
+    return crypto_markets
 
-
-# ─────────────────────────────────────────────
-# PARSE — convert raw API item to our schema
-# ─────────────────────────────────────────────
 
 def parse_market(item: Dict) -> Optional[Dict]:
-    """
-    Converts a raw Polymarket API response item into a clean
-    dict matching the Market table schema.
-    """
+    """Converts a raw Polymarket API item to our Market schema dict."""
+    market_id = item.get("id") or item.get("conditionId") or ""
+    if not market_id:
+        return None
+
     try:
         outcomes = item.get("outcomePrices", "[]")
         if isinstance(outcomes, str):
@@ -146,26 +78,23 @@ def parse_market(item: Dict) -> Optional[Dict]:
         current_odds = 0.5
 
     try:
-        expires_at = datetime.fromisoformat(
-            item.get("endDate", "").replace("Z", "+00:00")
-        )
+        end_str = item.get("endDate") or ""
+        expires_at = datetime.fromisoformat(end_str.replace("Z", "+00:00")) if end_str else datetime(2099, 1, 1)
     except Exception:
         expires_at = datetime(2099, 1, 1)
 
-    volume24hr = float(item.get("volume24hr") or 0)
+    volume24hr = float(item.get("volume24hr") or item.get("volume") or 0)
     volume1wk  = float(item.get("volume1wk") or 0)
-    avg_volume = (volume1wk / 7) if volume1wk > 0 else volume24hr
-    if avg_volume == 0:
-        avg_volume = 1.0
+    avg_volume = (volume1wk / 7) if volume1wk > 0 else max(volume24hr, 1.0)
 
     return {
-        "id":            item.get("id", ""),
-        "question":      item.get("question", "Unknown"),
-        "category":      item.get("category", "crypto"),
+        "id":            market_id,
+        "question":      item.get("question") or "Unknown",
+        "category":      item.get("category") or "crypto",
         "current_odds":  current_odds,
         "previous_odds": current_odds,
         "volume":        volume24hr,
         "avg_volume":    avg_volume,
-        "is_active":     item.get("active", True),
+        "is_active":     bool(item.get("active", True)),
         "expires_at":    expires_at,
     }

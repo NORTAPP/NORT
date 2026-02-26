@@ -116,7 +116,45 @@ def get_market(market_id: str):
 def refresh_markets():
     with Session(engine) as session:
         sync_markets(session)
-        return {"message": "Markets refreshed"}
+        # Return count after refresh
+        count_stmt = select(Market).where(Market.is_active == True)
+        count = len(session.exec(count_stmt).all())
+        return {"message": "Markets refreshed", "count": count}
+
+
+@router.get("/debug-polymarket")
+def debug_polymarket():
+    """
+    Hits Polymarket API directly and shows what comes back — no DB involved.
+    Use this to diagnose why markets aren't being fetched.
+    GET /markets/debug-polymarket
+    """
+    import httpx, os, json as _json
+    url = f"{os.getenv('POLYMARKET_API_URL', 'https://gamma-api.polymarket.com')}/markets"
+    params = {"active": "true", "closed": "false", "limit": 10}
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r = client.get(url, params=params)
+            raw = r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+    items = raw if isinstance(raw, list) else raw.get("markets") or raw.get("data") or []
+    return {
+        "response_type": type(raw).__name__,
+        "count": len(items),
+        "sample": [
+            {
+                "id":       i.get("id"),
+                "question": (i.get("question") or "")[:80],
+                "category": i.get("category"),
+                "endDate":  i.get("endDate"),
+                "active":   i.get("active"),
+                "volume24hr": i.get("volume24hr"),
+            }
+            for i in items[:5]
+        ]
+    }
 
 # ─────────────────────────────────────────────
 # HELPER — clean response format
