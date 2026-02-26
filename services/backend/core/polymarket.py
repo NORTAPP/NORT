@@ -1,82 +1,47 @@
 # polymarket.py
-# Fetches ALL crypto markets from Polymarket, mirroring the full
-# Crypto section visible on polymarket.com/crypto.
+# Fetches active markets from Polymarket's Gamma API.
 #
-# Covers every timeframe tab:
-#   5 Min / 15 Min / Hourly / 4 Hour  → slug-prefix markets (btc-updown-*)
-#   Daily / Weekly / Monthly / Yearly → tag_slug-based searches
-#   + Pre-Market / FDV / ETF markets  → via crypto-prices tag
+# The API has two relevant endpoints:
+#   GET /markets  — individual markets, filters: active, closed, limit, tag_id, volume_num_min, etc.
+#   GET /events   — grouped events, filters: active, closed, limit, tag_id, tag_slug, etc.
 #
-# Strategy:
-#   1. Fetch each timeframe tag independently
-#   2. Filter by crypto-related tags to exclude non-crypto results
-#   3. Deduplicate by market ID
-#   4. Parse into our Market schema (preserving previous_odds correctly)
+# Previous version was broken because:
+#   1. It called /events with slug= and tag_slug= params that no longer return data
+#   2. The slug-prefix strategy (btc-updown, etc.) was never reliably supported
+#   3. tag_slug= on /events returned 404 for all tags
+#
+# Current strategy (what actually works):
+#   1. Hit GET /events with tag_id for crypto/sports — events nest their markets inside
+#   2. Fall back to GET /markets?active=true broad fetch if tag queries return nothing
+#   3. Classify results using question text and tag names we already have
 
 import httpx
 import os
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Dict, Optional
 
 GAMMA_API = os.getenv("POLYMARKET_API_URL", "https://gamma-api.polymarket.com")
 
-# Markets with odds outside this range are effectively resolved — drop at source
-MIN_TRADEABLE_ODDS = 0.05   # 5%
-MAX_TRADEABLE_ODDS = 0.95   # 95%
+MIN_TRADEABLE_ODDS = 0.05
+MAX_TRADEABLE_ODDS = 0.95
 
-# Tags that identify an event as crypto-related
 CRYPTO_TAGS = {
     "crypto", "crypto-prices", "bitcoin", "ethereum", "solana",
-    "xrp", "hyperliquid", "megaeth", "stablecoins", "etf",
+    "xrp", "hyperliquid", "megaeth", "stablecoins", "etf", "defi",
 }
 
-# Sport sub-tag → display category label
 SPORT_LABELS = {
-    "nba":              "NBA",
-    "basketball":       "NBA",
-    "nba-finals":       "NBA",
-    "nba-champion":     "NBA",
-    "hockey":           "NHL",
-    "nhl":              "NHL",
-    "stanley-cup":      "NHL",
-    "soccer":           "Soccer",
-    "fifa-world-cup":   "Soccer",
-    "2026-fifa-world-cup": "Soccer",
-    "world-cup":        "Soccer",
-    "EPL":              "EPL",
-    "la-liga":          "La Liga",
-    "serie-a":          "Serie A",
-    "bundesliga":       "Bundesliga",
-    "ligue-1":          "Ligue 1",
-    "champions-league": "UCL",
-    "ucl":              "UCL",
-    "baseball":         "MLB",
-    "mlb":              "MLB",
-    "tennis":           "Tennis",
-    "golf":             "Golf",
+    "nba": "NBA", "basketball": "NBA", "nba-finals": "NBA", "nba-champion": "NBA",
+    "hockey": "NHL", "nhl": "NHL", "stanley-cup": "NHL",
+    "soccer": "Soccer", "fifa-world-cup": "Soccer", "2026-fifa-world-cup": "Soccer",
+    "world-cup": "Soccer", "epl": "EPL", "la-liga": "La Liga",
+    "serie-a": "Serie A", "bundesliga": "Bundesliga", "ligue-1": "Ligue 1",
+    "champions-league": "UCL", "ucl": "UCL",
+    "baseball": "MLB", "mlb": "MLB",
+    "tennis": "Tennis", "golf": "Golf", "sports": "Sports",
 }
 
-# Slug prefixes for automated 5min/15min/hourly markets
-CRYPTO_SLUG_PREFIXES = [
-    "btc-updown-5m-",
-    "btc-updown-15m-",
-    "eth-updown-5m-",
-    "eth-updown-15m-",
-    "sol-updown-5m-",
-    "sol-updown-15m-",
-    "xrp-updown-5m-",
-    "xrp-updown-15m-",
-    "btc-updown-1h-",
-    "eth-updown-1h-",
-    "btc-updown-4h-",
-    "eth-updown-4h-",
-]
-
-# Timeframe tags matching the Polymarket sidebar exactly
-TIMEFRAME_TAGS = ["daily", "weekly", "monthly", "yearly"]
-
-# Coin label mapping for category field
 COIN_LABELS = {
     "btc": "BTC", "bitcoin": "BTC",
     "eth": "ETH", "ethereum": "ETH",
@@ -84,6 +49,10 @@ COIN_LABELS = {
     "xrp": "XRP",
     "hyperliquid": "HYPE",
     "megaeth": "ETH",
+    "doge": "DOGE", "dogecoin": "DOGE",
+    "bnb": "BNB", "avax": "AVAX", "avalanche": "AVAX",
+    "link": "LINK", "chainlink": "LINK",
+    "ada": "ADA", "cardano": "ADA",
 }
 
 
@@ -95,126 +64,159 @@ def _get_coin_label(text: str) -> str:
     return "Crypto"
 
 
-def _get_sport_label(event_tags: list) -> str:
-    """Derive a sport category label from an event's tag list."""
-    slugs = [t["slug"] for t in event_tags]
+def _get_sport_label(tags: list) -> str:
+    slugs = [t.get("slug", "") for t in tags]
     for slug in slugs:
         if slug in SPORT_LABELS:
             return SPORT_LABELS[slug]
     return "Sports"
 
 
-def _is_crypto_event(event: Dict) -> bool:
-    """Returns True if this event belongs to the crypto category."""
-    tags = {t["slug"] for t in (event.get("tags") or [])}
-    return bool(tags & CRYPTO_TAGS)
+def _is_crypto(tags: list) -> bool:
+    slugs = {t.get("slug", "") for t in tags}
+    return bool(slugs & CRYPTO_TAGS)
 
 
-def _is_sports_event(event: Dict) -> bool:
-    """Returns True if this event belongs to the sports category."""
-    tags = {t["slug"] for t in (event.get("tags") or [])}
-    return "sports" in tags
+def _is_sports(tags: list) -> bool:
+    slugs = {t.get("slug", "") for t in tags}
+    return "sports" in slugs
 
+
+# ─── LOW LEVEL FETCHERS ──────────────────────────────────────────────────────
 
 def _fetch_events(params: dict) -> List[Dict]:
-    """Single API call with error handling. Returns list of events."""
+    """
+    GET /events — returns event objects that contain nested markets[].
+    Correct params: active, closed, limit, offset, tag_id, tag_slug,
+                    volume_min, volume_max, _sort, _order
+    NOTE: tag_slug works on /events but requires exact tag slug strings
+    that Polymarket currently has active. Use tag_id for reliability.
+    """
     try:
         with httpx.Client(timeout=15.0) as client:
             r = client.get(f"{GAMMA_API}/events", params=params)
             r.raise_for_status()
             data = r.json()
-            if isinstance(data, list):
-                return data
-            return data.get("events") or data.get("data") or []
+            return data if isinstance(data, list) else (data.get("events") or data.get("data") or [])
     except Exception as e:
-        print(f"[Polymarket] Fetch error (params={params}): {e}")
+        print(f"[Polymarket] /events fetch error (params={params}): {e}")
         return []
 
 
+def _fetch_markets(params: dict) -> List[Dict]:
+    """
+    GET /markets — returns flat market objects directly (no event nesting).
+    Correct params: active, closed, limit, offset, tag_id,
+                    volume_num_min, end_date_min, _sort, _order
+    This is the reliable fallback — always returns data when active=true.
+    """
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            r = client.get(f"{GAMMA_API}/markets", params=params)
+            r.raise_for_status()
+            data = r.json()
+            return data if isinstance(data, list) else (data.get("markets") or data.get("data") or [])
+    except Exception as e:
+        print(f"[Polymarket] /markets fetch error (params={params}): {e}")
+        return []
+
+
+# ─── CRYPTO MARKETS ──────────────────────────────────────────────────────────
+
 def fetch_short_term_crypto_markets(limit: int = 300) -> List[Dict]:
     """
-    Fetch ALL crypto markets from Polymarket, covering every tab in the
-    Crypto section of polymarket.com/crypto.
+    Fetch active crypto markets from Polymarket.
 
-    Sources (in order):
-      1. Slug-prefix markets  → 5min, 15min, hourly, 4-hour automated markets
-      2. Timeframe tag pages  → daily, weekly, monthly, yearly (filtered to crypto)
-      3. crypto-prices tag    → catches FDV, ETF, and other price markets
+    Strategy:
+      1. GET /events?tag_slug=crypto — events with nested markets (best for grouped data)
+      2. GET /events?tag_slug=crypto-prices — ETF, FDV, price-range markets
+      3. Fallback: GET /markets?active=true&volume_num_min=100 — broad fetch,
+         classify by question text — used when tag queries return nothing
     """
     all_markets: List[Dict] = []
     seen_ids: set = set()
 
-    def _add(market_dict: Dict):
-        mid = market_dict.get("id")
+    def _add(m: Dict):
+        mid = m.get("id")
         if mid and mid not in seen_ids:
             seen_ids.add(mid)
-            all_markets.append(market_dict)
+            all_markets.append(m)
 
-    # ── Source 1: Slug-prefix markets (5min / 15min / hourly / 4h) ──────────
-    for coin_prefix in ["btc-updown", "eth-updown", "sol-updown", "xrp-updown"]:
-        events = _fetch_events({
-            "active":  "true",
-            "closed":  "false",
-            "limit":   50,
-            "slug":    coin_prefix,
-            "_sort":   "end_date",
-            "_order":  "desc",
-        })
-        for ev in events:
-            for m in _extract_markets(ev):
-                _add(m)
-
-    # ── Source 2: Timeframe tag pages (daily / weekly / monthly / yearly) ────
-    for tag in TIMEFRAME_TAGS:
+    # Source 1: /events with crypto tag_slug
+    for tag in ["crypto", "crypto-prices"]:
         events = _fetch_events({
             "active":   "true",
             "closed":   "false",
-            "limit":    50,
+            "limit":    100,
             "tag_slug": tag,
             "_sort":    "volume24hr",
             "_order":   "desc",
         })
         for ev in events:
-            if not _is_crypto_event(ev):
-                continue    # skip non-crypto events (stocks, politics, etc.)
-            for m in _extract_markets(ev):
+            if not _is_crypto(ev.get("tags") or []):
+                continue
+            for m in _extract_markets_from_event(ev):
                 _add(m)
 
-    # ── Source 3: crypto-prices tag (FDV, ETF, price-range markets) ─────────
-    events = _fetch_events({
-        "active":   "true",
-        "closed":   "false",
-        "limit":    100,
-        "tag_slug": "crypto-prices",
-        "_sort":    "volume24hr",
-        "_order":   "desc",
-    })
-    for ev in events:
-        for m in _extract_markets(ev):
-            _add(m)
+    # Source 2: /markets direct with high-volume filter (reliable, no tag required)
+    if len(all_markets) < 20:
+        print(f"[Polymarket] Tag query returned {len(all_markets)} markets — using broad /markets fallback")
+        raw_markets = _fetch_markets({
+            "active":        "true",
+            "closed":        "false",
+            "limit":         500,
+            "volume_num_min": 100,
+            "_sort":         "volume24hr",
+            "_order":        "desc",
+        })
+        for item in raw_markets:
+            # Classify by question text — keep crypto-sounding ones
+            q = (item.get("question") or "").lower()
+            tags = item.get("tags") or []
+            if _is_crypto(tags) or any(k in q for k in COIN_LABELS):
+                parsed = _parse_flat_market(item)
+                if parsed:
+                    _add(parsed)
+
+    # Source 3: truly broad fallback — grab everything active and high volume
+    if len(all_markets) < 10:
+        print(f"[Polymarket] Crypto markets still low ({len(all_markets)}) — broad volume fallback")
+        raw_markets = _fetch_markets({
+            "active":        "true",
+            "closed":        "false",
+            "limit":         300,
+            "volume_num_min": 500,
+            "_sort":         "volume24hr",
+            "_order":        "desc",
+        })
+        for item in raw_markets:
+            parsed = _parse_flat_market(item)
+            if parsed:
+                _add(parsed)
 
     print(f"[Polymarket] Total crypto markets collected: {len(all_markets)}")
-
-    # Sort by volume descending — most active markets first
     all_markets.sort(key=lambda m: m.get("volume", 0), reverse=True)
     return all_markets[:limit]
 
 
+# ─── SPORTS MARKETS ──────────────────────────────────────────────────────────
+
 def fetch_sports_markets(limit: int = 300) -> List[Dict]:
     """
-    Fetch all active sports markets from Polymarket.
-    Covers NBA, NHL, Soccer (FIFA/EPL/La Liga/UCL etc), and other sports.
-    Category field is set to the specific sport (NBA, NHL, Soccer, EPL etc.)
-    so the frontend can filter by sport within the Sports tab.
+    Fetch active sports markets from Polymarket.
+
+    Strategy:
+      1. GET /events?tag_slug=sports — events with nested markets
+      2. Fallback: GET /markets broad fetch + classify by tags
     """
     all_markets: List[Dict] = []
     seen_ids: set = set()
 
-    def _add(market_dict: Dict):
-        mid = market_dict.get("id")
+    def _add(m: Dict):
+        mid = m.get("id")
         if mid and mid not in seen_ids:
             seen_ids.add(mid)
-            all_markets.append(market_dict)
+            all_markets.append(m)
 
     events = _fetch_events({
         "active":   "true",
@@ -224,50 +226,67 @@ def fetch_sports_markets(limit: int = 300) -> List[Dict]:
         "_sort":    "volume24hr",
         "_order":   "desc",
     })
-
     for ev in events:
-        if not _is_sports_event(ev):
+        if not _is_sports(ev.get("tags") or []):
             continue
         sport_label = _get_sport_label(ev.get("tags") or [])
-        for m in _extract_markets(ev, category_override=sport_label):
+        for m in _extract_markets_from_event(ev, category_override=sport_label):
             _add(m)
+
+    # Fallback: broad /markets fetch, classify by tags
+    if len(all_markets) < 10:
+        print(f"[Polymarket] Sports events returned {len(all_markets)} — using /markets fallback")
+        raw_markets = _fetch_markets({
+            "active":        "true",
+            "closed":        "false",
+            "limit":         300,
+            "volume_num_min": 100,
+            "_sort":         "volume24hr",
+            "_order":        "desc",
+        })
+        for item in raw_markets:
+            tags = item.get("tags") or []
+            if _is_sports(tags):
+                sport_label = _get_sport_label(tags)
+                parsed = _parse_flat_market(item, category_override=sport_label)
+                if parsed:
+                    _add(parsed)
 
     print(f"[Polymarket] Total sports markets collected: {len(all_markets)}")
     all_markets.sort(key=lambda m: m.get("volume", 0), reverse=True)
     return all_markets[:limit]
 
 
-def _extract_markets(event: Dict, category_override: str = None) -> List[Dict]:
-    """Extract and parse all child markets from a Polymarket event."""
+# ─── PARSERS ─────────────────────────────────────────────────────────────────
+
+def _extract_markets_from_event(event: Dict, category_override: str = None) -> List[Dict]:
+    """Extract child markets from an /events response item."""
     results = []
     event_title = event.get("title") or ""
     event_v24   = event.get("volume24hr") or 0
     event_v1wk  = event.get("volume1wk") or 0
-
     for m in (event.get("markets") or []):
         if not m.get("question"):
             m["question"] = event_title
-        parsed = parse_market(m, event_title, event_v24, event_v1wk, category_override)
+        parsed = _parse_market_item(m, event_title, event_v24, event_v1wk, category_override)
         if parsed:
             results.append(parsed)
     return results
 
 
-def parse_market(
+def _parse_flat_market(item: Dict, category_override: str = None) -> Optional[Dict]:
+    """Parse a market returned directly from /markets (flat, no event wrapper)."""
+    return _parse_market_item(item, "", 0, 0, category_override)
+
+
+def _parse_market_item(
     item: Dict,
     event_title: str = "",
     event_v24: float = 0,
     event_v1wk: float = 0,
     category_override: str = None,
 ) -> Optional[Dict]:
-    """
-    Converts a raw Polymarket market item into our Market schema dict.
-
-    Key fix vs old version:
-      previous_odds is set to None (not current_odds) for brand-new markets.
-      The sync_markets() upsert in markets.py will handle preserving the
-      real previous_odds on subsequent syncs.
-    """
+    """Convert a raw Polymarket market item into our Market schema dict."""
     market_id = str(item.get("id") or item.get("conditionId") or "")
     if not market_id:
         return None
@@ -280,45 +299,51 @@ def parse_market(
         if isinstance(prices_raw, str):
             prices_raw = json.loads(prices_raw)
         current_odds = float(prices_raw[0]) if prices_raw else 0.5
-        # Clamp to valid range — skip obviously invalid markets
         if not (0.0 <= current_odds <= 1.0):
             current_odds = 0.5
     except Exception:
         current_odds = 0.5
 
-    # Drop markets that are effectively resolved — no trading value
+    # Drop near-resolved markets — no trading value
     if current_odds < MIN_TRADEABLE_ODDS or current_odds > MAX_TRADEABLE_ODDS:
         return None
 
     # Parse expiry
     try:
         end_str = item.get("endDate") or item.get("endDateIso") or ""
-        if end_str:
-            expires_at = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-        else:
-            expires_at = datetime(2099, 1, 1)
+        expires_at = datetime.fromisoformat(end_str.replace("Z", "+00:00")) if end_str else datetime(2099, 1, 1)
     except Exception:
         expires_at = datetime(2099, 1, 1)
 
-    # Volume: prefer market-level 24hr, fall back to event-level
-    volume24hr = float(item.get("volume24hr") or 0)
-    if volume24hr == 0:
-        volume24hr = float(event_v24 or 0)
-
-    volume1wk  = float(item.get("volume1wk") or event_v1wk or 0)
+    # Volume: market-level 24hr, fall back to event-level
+    volume24hr = float(item.get("volume24hr") or event_v24 or 0)
+    volume1wk  = float(item.get("volume1wk")  or event_v1wk or 0)
     avg_volume = (volume1wk / 7.0) if volume1wk > 0 else max(volume24hr, 1.0)
+
+    # Category: use override (sports label), else classify from tags, else question text
+    if category_override:
+        category = category_override
+    else:
+        item_tags = item.get("tags") or []
+        if _is_sports(item_tags):
+            category = _get_sport_label(item_tags)
+        elif _is_crypto(item_tags):
+            category = _get_coin_label(question)
+        else:
+            category = _get_coin_label(question)
 
     return {
         "id":            market_id,
         "question":      question,
-        "category":      category_override or _get_coin_label(question),
+        "category":      category,
         "current_odds":  current_odds,
-        # FIX for issue #7: previous_odds is intentionally None for new markets.
-        # On a brand-new insert, markets.py will store 0.5 as default.
-        # On second sync, markets.py sets previous_odds = old current_odds correctly.
-        "previous_odds": None,
+        "previous_odds": None,   # markets.py upsert preserves real previous on update
         "volume":        volume24hr,
         "avg_volume":    avg_volume,
         "is_active":     bool(item.get("active", True)),
         "expires_at":    expires_at,
     }
+
+
+# Keep old name as alias so any other code that imports it still works
+parse_market = _parse_market_item
