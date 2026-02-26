@@ -6,7 +6,10 @@ from datetime import datetime
 
 from services.backend.data.database import engine
 from services.backend.data.models import Market
-from services.backend.core.polymarket import fetch_short_term_crypto_markets, fetch_sports_markets
+from services.backend.core.polymarket import (
+    fetch_short_term_crypto_markets,
+    fetch_sports_markets,
+)
 
 router = APIRouter(prefix="/markets", tags=["Markets"], redirect_slashes=False)
 
@@ -22,13 +25,18 @@ def sync_markets(session: Session = None):
     fresh_markets  = crypto_markets + sports_markets
 
     if not fresh_markets:
-        print("[sync] No markets returned from Polymarket.")
+        print("[sync] No markets returned from Polymarket — keeping existing DB data.")
+        return  # ← Never wipe the DB if Polymarket is unreachable
+
+    # Safety net: if we got suspiciously few results, don't wipe existing data
+    existing_count = len(session.exec(select(Market)).all()) if session else 0
+    if len(fresh_markets) < 10 and existing_count > 50:
+        print(f"[sync] Only {len(fresh_markets)} markets returned but DB has {existing_count} — skipping wipe to protect existing data.")
         return
 
     def _do_sync(s):
-        # Mark all existing markets inactive first
-        existing = s.exec(select(Market)).all()
-        for m in existing:
+        # Mark all existing markets inactive (will be re-activated if still live)
+        for m in s.exec(select(Market)).all():
             m.is_active = False
             s.add(m)
         s.commit()
@@ -38,15 +46,14 @@ def sync_markets(session: Session = None):
             try:
                 if not parsed or not parsed.get("id"):
                     continue
-                parsed["category"] = parsed.get("category") or "Crypto"
-                parsed["question"] = parsed.get("question") or "Unknown"
+                parsed["category"]   = parsed.get("category")   or "Crypto"
+                parsed["question"]   = parsed.get("question")   or "Unknown"
                 parsed["expires_at"] = parsed.get("expires_at") or datetime(2099, 1, 1)
 
                 existing_market = s.get(Market, str(parsed["id"]))
                 if existing_market:
                     existing_market.question      = parsed["question"]
                     existing_market.category      = parsed["category"]
-                    # Preserve real previous_odds: save the old current before overwriting
                     existing_market.previous_odds = existing_market.current_odds
                     existing_market.current_odds  = parsed["current_odds"]
                     existing_market.volume        = parsed["volume"]
@@ -55,9 +62,6 @@ def sync_markets(session: Session = None):
                     existing_market.expires_at    = parsed["expires_at"]
                     s.add(existing_market)
                 else:
-                    # Brand-new market: previous_odds defaults to current_odds
-                    # so momentum is 0 until the second sync (correct behaviour —
-                    # we have no historical data yet)
                     new_market = parsed.copy()
                     new_market["previous_odds"] = parsed["current_odds"]
                     s.add(Market(**new_market))
