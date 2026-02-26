@@ -37,10 +37,10 @@ function StreakFlame({ streak }) {
 
 export default function LeaderboardPage() {
   const { walletAddress } = useAuth();
-  const [board, setBoard]   = useState([]);
-  const [myRank, setMyRank] = useState(null);
+  const [board, setBoard]     = useState([]);
+  const [myRank, setMyRank]   = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState(null);
+  const [error, setError]     = useState(null);
 
   useEffect(() => {
     setLoading(true);
@@ -49,16 +49,16 @@ export default function LeaderboardPage() {
       getLeaderboard(50),
       walletAddress ? getMyRank(walletAddress) : Promise.resolve(null),
     ])
-      .then(([lb, me]) => {
-        setBoard(lb);
-        setMyRank(me);
-      })
+      .then(([lb, me]) => { setBoard(lb); setMyRank(me); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [walletAddress]);
 
-  const top3 = board.slice(0, 3);
-  const rest = board.slice(3);
+  // Top 3 for podium, rest for table (including rank 1-3 again for small boards)
+  const showPodium = board.length >= 2;
+  const top3 = board.slice(0, Math.min(3, board.length));
+  // Table always shows all entries so ranks 1-3 appear even on small boards
+  const tableRows = board;
 
   return (
     <AuthGate>
@@ -74,17 +74,19 @@ export default function LeaderboardPage() {
           <div className="page-header">
             <div>
               <div className="page-title">Paper Trading Ranks</div>
-              <div className="page-meta">{board.length} traders — ranked by portfolio value</div>
+              <div className="page-meta">
+                {loading ? 'Loading...' : `${board.length} trader${board.length !== 1 ? 's' : ''} — ranked by portfolio value`}
+              </div>
             </div>
           </div>
 
-          {/* My rank card — only shown if user has traded */}
-          {myRank && (
+          {/* ── My Rank card — only if user has placed trades ── */}
+          {myRank ? (
             <div className="my-rank-card fu d1">
               <div className="my-rank-left">
                 <div className="my-rank-num">#{myRank.rank}</div>
                 <div>
-                  <div className="my-rank-name">You</div>
+                  <div className="my-rank-name">You · {myRank.display_name}</div>
                   <BadgePill badge={myRank.badge} />
                 </div>
               </div>
@@ -115,6 +117,13 @@ export default function LeaderboardPage() {
                 <span className="xp-label">{myRank.xp % 500}/500 XP to next rank</span>
               </div>
             </div>
+          ) : !loading && walletAddress && (
+            /* User is logged in but has no trades yet */
+            <div className="my-rank-card fu d1" style={{ textAlign: 'center', padding: 20 }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>🏆</div>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>You're not ranked yet</div>
+              <div style={{ fontSize: 12, color: 'var(--g3)' }}>Place your first paper trade to appear on the board</div>
+            </div>
           )}
 
           {error ? (
@@ -135,11 +144,12 @@ export default function LeaderboardPage() {
           ) : board.length === 0 ? (
             <div className="empty fu d2">
               <div className="empty-icon">🏆</div>
-              <div className="empty-text">No traders yet. Place the first paper trade!</div>
+              <div className="empty-text">No traders yet — be the first to place a paper trade!</div>
             </div>
           ) : (
             <>
-              {top3.length === 3 && (
+              {/* Podium — only when there are 2+ traders */}
+              {showPodium && (
                 <div className="podium-wrap fu d2">
                   {top3.map((entry, i) => (
                     <PodiumCard key={entry.telegram_user_id} entry={entry} pos={i} />
@@ -147,6 +157,7 @@ export default function LeaderboardPage() {
                 </div>
               )}
 
+              {/* Full table — all ranks */}
               <div className="lb-table fu d3">
                 <div className="lb-table-header">
                   <span>#</span>
@@ -157,7 +168,7 @@ export default function LeaderboardPage() {
                   <span>P&amp;L</span>
                   <span>Portfolio</span>
                 </div>
-                {rest.map(entry => (
+                {tableRows.map(entry => (
                   <div
                     key={entry.telegram_user_id}
                     className={'lb-row' + (myRank?.telegram_user_id === entry.telegram_user_id ? ' lb-row-me' : '')}

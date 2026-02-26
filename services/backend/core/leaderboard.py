@@ -170,6 +170,7 @@ def _display_name(user: Optional[User], tid: str) -> str:
 def get_leaderboard(session: Session, limit: int = 50) -> List[dict]:
     """
     Build ranked leaderboard from all WalletConfig + PaperTrade records.
+    Only users who have placed at least 1 trade appear on the board.
     Sorted by portfolio_value desc, then net_pnl desc.
     """
     configs    = session.exec(select(WalletConfig)).all()
@@ -180,12 +181,12 @@ def get_leaderboard(session: Session, limit: int = 50) -> List[dict]:
     for t in all_trades:
         trades_by_user.setdefault(t.telegram_user_id, []).append(t)
 
+    # Build lookup by every possible key variant so display names always resolve
     user_by_tid: dict = {}
     for u in all_users:
         if u.telegram_id:
             user_by_tid[u.telegram_id] = u
         if u.wallet_address:
-            # Index by both original and lowercase — WalletConfig.telegram_user_id is lowercase
             user_by_tid[u.wallet_address] = u
             user_by_tid[u.wallet_address.lower()] = u
 
@@ -193,7 +194,12 @@ def get_leaderboard(session: Session, limit: int = 50) -> List[dict]:
     for config in configs:
         tid    = config.telegram_user_id
         trades = trades_by_user.get(tid, [])
-        user   = user_by_tid.get(tid)
+
+        # ── Only include users who have actually traded ──
+        if len(trades) == 0:
+            continue
+
+        user = user_by_tid.get(tid)
 
         open_trades   = [t for t in trades if t.status == "OPEN"]
         closed_trades = [t for t in trades if t.status == "CLOSED"]
@@ -201,9 +207,6 @@ def get_leaderboard(session: Session, limit: int = 50) -> List[dict]:
 
         open_cost       = sum(t.total_cost for t in open_trades)
         portfolio_value = round(config.paper_balance + open_cost, 2)
-        # net_pnl = how much above/below the starting $1000 the user is.
-        # paper_balance already reflects all closed trade payouts, so we
-        # do NOT add realized_pnl again — that would double-count it.
         net_pnl         = round(portfolio_value - config.total_deposited, 2)
         total_trades    = len(trades)
         win_rate        = round(len(winning) / len(closed_trades) * 100, 1) if closed_trades else 0.0
