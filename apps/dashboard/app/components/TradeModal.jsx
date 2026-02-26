@@ -45,9 +45,11 @@ export default function TradeModal({ signal, initialSide = 'yes', onClose, onSuc
     );
   }
 
-  const price  = side === 'yes' ? signal.yes / 100 : (100 - signal.yes) / 100;
-  const shares = amount ? (parseFloat(amount) / price).toFixed(1) : '—';
-  const payout = amount ? (parseFloat(amount) / price).toFixed(2) : '—';
+  // FIX: clamp yes to 1-99 so price is never 0 (which causes Infinity shares/payout)
+  const yesOdds = Math.max(1, Math.min(99, signal.yes || 50));
+  const price  = side === 'yes' ? yesOdds / 100 : (100 - yesOdds) / 100;
+  const shares = amount && parseFloat(amount) > 0 ? (parseFloat(amount) / price).toFixed(1) : '—';
+  const payout = amount && parseFloat(amount) > 0 ? (parseFloat(amount) / price).toFixed(2) : '—';
 
   const submit = async () => {
     if (!amount || parseFloat(amount) <= 0) return;
@@ -90,14 +92,14 @@ export default function TradeModal({ signal, initialSide = 'yes', onClose, onSuc
             onClick={() => { setSide('yes'); haptic.light?.(); }}
           >
             <span className="side-label">▲ YES</span>
-            <span className="side-price">{signal.yes}¢</span>
+            <span className="side-price">{yesOdds}¢</span>
           </button>
           <button
             className={`side-btn ${side === 'no' ? 'active-no' : ''}`}
             onClick={() => { setSide('no'); haptic.light?.(); }}
           >
             <span className="side-label">▼ NO</span>
-            <span className="side-price">{100 - signal.yes}¢</span>
+            <span className="side-price">{100 - yesOdds}¢</span>
           </button>
         </div>
 

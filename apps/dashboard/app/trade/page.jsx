@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getTrades, getWallet, getPositionValue, sellTrade, getAchievements } from '@/lib/api';
 import { useAchievement } from '@/components/AchievementContext';
 import { useTelegram } from '@/hooks/useTelegram';
@@ -142,6 +142,9 @@ export default function BetsPage() {
   const [sellTarget, setSellTarget] = useState(null); // trade to sell
   const { showAchievement }       = useAchievement();
   const { haptic }                = useTelegram();
+  // FIX: track which achievement IDs have already been shown this session
+  // so they don't pop up again on every refresh/load call.
+  const shownAchievements = useRef(new Set());
 
   const load = async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -151,9 +154,21 @@ export default function BetsPage() {
       setWallet(w);
       if (t.length > 0) {
         const ach = await getAchievements();
-        if (t.length >= 1)  { const a = ach.find(x => x.id === 'first' && x.earned); if (a) showAchievement(a); }
-        if (t.length >= 10) { const a = ach.find(x => x.id === 'paper' && x.earned); if (a) showAchievement(a); }
-        if (t.length >= 50) { const a = ach.find(x => x.id === 'whale' && x.earned); if (a) showAchievement(a); }
+        const milestones = [
+          { count: 1,  id: 'first' },
+          { count: 10, id: 'paper' },
+          { count: 50, id: 'whale' },
+        ];
+        for (const { count, id } of milestones) {
+          if (t.length >= count && !shownAchievements.current.has(id)) {
+            const a = ach.find(x => x.id === id && x.earned);
+            if (a) {
+              shownAchievements.current.add(id);
+              showAchievement(a);
+              break; // show one at a time — don't stack popups
+            }
+          }
+        }
       }
     } finally {
       setLoading(false);
