@@ -104,19 +104,10 @@ def get_markets(
         }
 
 
-@router.get("/{market_id}")
-def get_market(market_id: str):
-    with Session(engine) as session:
-        market = session.get(Market, market_id)
-        if not market:
-            raise HTTPException(status_code=404, detail=f"Market {market_id} not found")
-        return market_to_response(market)
-
 @router.get("/refresh")
 def refresh_markets():
     with Session(engine) as session:
         sync_markets(session)
-        # Return count after refresh
         count_stmt = select(Market).where(Market.is_active == True)
         count = len(session.exec(count_stmt).all())
         return {"message": "Markets refreshed", "count": count}
@@ -155,6 +146,16 @@ def debug_polymarket():
             for i in items[:5]
         ]
     }
+
+
+@router.get("/{market_id}")
+def get_market(market_id: str):
+    with Session(engine) as session:
+        market = session.get(Market, market_id)
+        if not market:
+            raise HTTPException(status_code=404, detail=f"Market {market_id} not found")
+        return market_to_response(market)
+
 
 # ─────────────────────────────────────────────
 # HELPER — clean response format
