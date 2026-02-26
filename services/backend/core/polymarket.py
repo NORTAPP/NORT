@@ -22,6 +22,8 @@ SHORT_TERM_KEYWORDS = [
     "1 hour", "1-hour", "hourly", "60 minutes",
     "next hour", "this hour",
     "in the next 5", "in the next 15",
+    "today", "tonight", "this week", "end of day",
+    "by midnight", "by eod",
 ]
 
 # Crypto tokens we care about
@@ -36,47 +38,50 @@ CRYPTO_KEYWORDS = [
     "matic", "polygon",
     "link", "chainlink",
     "ada", "cardano",
+    "crypto", "coin", "token",
 ]
 
-# Maximum market duration in hours — anything longer is NOT short-term
-MAX_DURATION_HOURS = 2
+# Accept markets expiring within this many hours (short-term window)
+MAX_DURATION_HOURS = 24
 
 
 def _is_short_term_crypto(item: Dict) -> bool:
     """
-    Returns True if this market is a short-term (5min/15min/1hr) crypto price market.
-    Checks: question text, tags, category, and market duration.
+    Returns True if this is a crypto market expiring within 24 hours
+    OR explicitly mentions a short-term timeframe (5min/15min/1hr).
     """
     question = (item.get("question") or "").lower()
     category = (item.get("category") or "").lower()
-    tags = [t.lower() for t in (item.get("tags") or [])]
-    slug = (item.get("slug") or "").lower()
+    slug     = (item.get("slug") or "").lower()
+    tags     = [t.lower() for t in (item.get("tags") or [])]
 
-    # Must mention a crypto token
-    has_crypto = any(kw in question or kw in slug for kw in CRYPTO_KEYWORDS)
+    # Must be crypto-related
+    has_crypto = (
+        "crypto" in category
+        or any(kw in question or kw in slug for kw in CRYPTO_KEYWORDS)
+        or any(kw in tag for kw in CRYPTO_KEYWORDS for tag in tags)
+    )
     if not has_crypto:
         return False
 
-    # Must mention a short-term timeframe in the question OR be in crypto category
-    # with a very short expiry window
-    has_timeframe_keyword = any(kw in question for kw in SHORT_TERM_KEYWORDS)
+    # Accept if it mentions an explicit short-term timeframe
+    has_timeframe = any(kw in question for kw in SHORT_TERM_KEYWORDS)
+    if has_timeframe:
+        return True
 
-    # Check duration from endDate — must expire within MAX_DURATION_HOURS
-    short_duration = False
+    # Accept if it expires within MAX_DURATION_HOURS
     try:
-        end_date_str = item.get("endDate") or item.get("end_date_iso") or ""
-        if end_date_str:
-            end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+        end_str = item.get("endDate") or item.get("end_date_iso") or ""
+        if end_str:
+            end_date = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
             now = datetime.now(timezone.utc)
-            duration_hours = (end_date - now).total_seconds() / 3600
-            # Accept markets that expire within 2 hours (they're already running)
-            # OR were created as short-term (duration from creation < 2 hours)
-            if 0 < duration_hours <= MAX_DURATION_HOURS:
-                short_duration = True
+            hours_left = (end_date - now).total_seconds() / 3600
+            if 0 < hours_left <= MAX_DURATION_HOURS:
+                return True
     except Exception:
         pass
 
-    return has_timeframe_keyword or (has_crypto and short_duration)
+    return False
 
 
 # ─────────────────────────────────────────────
