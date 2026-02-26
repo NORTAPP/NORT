@@ -177,16 +177,29 @@ export async function paperTrade({ marketId, side, amount, price }) {
     await fetch(`${BASE}/api/wallet/connect`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ wallet_address: userId, telegram_id: userId }),
+      // Don't set telegram_id here — it has a UNIQUE constraint and
+      // the wallet address is not a real Telegram ID.
+      // The wallet_address itself is used as the trading key.
+      body:    JSON.stringify({ wallet_address: userId }),
     });
   } catch {}
 
   // price_per_share must be between 0 and 1 (e.g. 0.55 for 55¢)
   // price coming in may be a percentage (55) or already decimal (0.55)
-  const normalizedPrice = price > 1 ? price / 100 : price;
+  const rawPrice = parseFloat(price);
+  let normalizedPrice = rawPrice > 1 ? rawPrice / 100 : rawPrice;
+  // Clamp to valid range — backend requires strictly between 0 and 1
+  normalizedPrice = Math.min(0.99, Math.max(0.01, normalizedPrice));
   // shares = amount / price_per_share, minimum 1, capped to 1 decimal
-  const computedShares = parseFloat(amount) / normalizedPrice;
+  const rawAmount = parseFloat(amount);
+  if (!rawAmount || rawAmount <= 0) throw new Error('Amount must be greater than 0');
+  const computedShares = rawAmount / normalizedPrice;
   const shares = Math.max(1, Math.round(computedShares * 10) / 10);
+  // total_cost guard: backend requires >= $1
+  const totalCost = Math.round(shares * normalizedPrice * 100) / 100;
+  if (totalCost < 1.0) {
+    throw new Error('Minimum trade value is $1.00');
+  }
 
   const body = {
     telegram_user_id: userId,
@@ -203,7 +216,17 @@ export async function paperTrade({ marketId, side, amount, price }) {
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Paper trade failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const errJson = await res.json();
+      // FastAPI 422 puts the Pydantic errors in errJson.detail
+      detail = JSON.stringify(errJson.detail ?? errJson);
+    } catch {}
+    console.error('[paperTrade] 422 body sent:', body);
+    console.error('[paperTrade] error detail:', detail);
+    throw new Error(`Trade failed (${res.status}): ${detail}`);
+  }
   const r = await res.json();
   return {
     id:       r.trade_id ?? `t${Date.now()}`,

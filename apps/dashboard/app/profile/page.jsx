@@ -28,16 +28,14 @@ export default function ProfilePage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Auto-register wallet in DB so username save & trades work
+  // Auto-register wallet in DB so trades work
   useEffect(() => {
     if (!walletAddress) return;
     fetch(`${BASE}/api/wallet/connect`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        wallet_address: walletAddress,
-        telegram_id:   walletAddress.toLowerCase(),
-      }),
+      // Do NOT pass telegram_id here — it has a UNIQUE constraint.
+      body: JSON.stringify({ wallet_address: walletAddress.toLowerCase() }),
     }).catch(() => {});
   }, [walletAddress]);
 
