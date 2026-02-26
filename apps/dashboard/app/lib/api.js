@@ -26,37 +26,33 @@ const getStoredWallet = () => {
 // ─── SIGNALS ─────────────────────────────────────────────────────────────────
 
 export async function getSignals(filter = 'all') {
-  // Fetch signals and markets in parallel
-  const [sigRes, mktRes] = await Promise.all([
-    fetch(`${BASE}/signals/?top=20`),
-    fetch(`${BASE}/markets/?limit=100`),
-  ]);
+  // Signals endpoint already embeds question, current_odds, volume, category —
+  // we only need the markets fetch as a secondary enrichment, not the source of truth.
+  const sigRes = await fetch(`${BASE}/signals/?top=20`);
+  if (!sigRes.ok) throw new Error(`Failed to load signals`);
 
-  if (!sigRes.ok && !mktRes.ok) throw new Error(`Failed to load feed`);
-
-  // Backend returns a plain array for signals
-  const sigData = sigRes.ok ? await sigRes.json() : [];
-  const mktData = mktRes.ok ? await mktRes.json() : { markets: [] };
-
-  // Build a lookup map: market_id → market object
-  const marketMap = {};
-  (mktData.markets || []).forEach(m => { marketMap[m.id] = m; });
-
-  // Signals is a plain array from the backend
+  const sigData = await sigRes.json();
   const rawSignals = Array.isArray(sigData) ? sigData : (sigData.signals || []);
 
   const signals = rawSignals.map(s => {
-    const market  = marketMap[s.market_id] || {};
     const heatPct = Math.max(0, Math.min(100, Math.round((s.score || 0) * 100)));
     const status  = heatPct >= 80 ? 'hot' : heatPct >= 50 ? 'warm' : 'cool';
+
+    // FIX: use odds/question/category/volume directly from the signal object.
+    // The signals endpoint enriches these server-side — no second lookup needed.
+    // This prevents yes=0 (→ price=0 → Infinity shares) when a market isn't
+    // in the top-100 of the separate /markets/ response.
+    const rawOdds = s.current_odds ?? 0.5;
+    const yesInt  = Math.max(1, Math.min(99, Math.round(rawOdds * 100)));
+
     return {
       id:     s.market_id,
-      cat:    market.category || 'Crypto',
+      cat:    s.category || 'Crypto',
       heat:   `${heatPct}° ${status.toUpperCase()}`,
       status,
-      q:      market.question || s.reason || 'Unknown market',
-      yes:    Math.round((market.current_odds || 0) * 100),
-      vol:    abbr(market.volume || 0),
+      q:      s.question || s.reason || 'Unknown market',
+      yes:    yesInt,
+      vol:    abbr(s.volume || 0),
       locked: (s.score || 0) >= 0.7,
       advice: s.reason || '',
     };
@@ -76,7 +72,7 @@ export async function getMarket(id) {
     id:     m.id,
     q:      m.question,
     cat:    m.category,
-    yes:    Math.round((m.current_odds || 0) * 100),
+    yes:    Math.max(1, Math.min(99, Math.round((m.current_odds || 0.5) * 100))),
     vol:    abbr(m.volume || 0),
     status: 'info',
     advice: '',
@@ -85,14 +81,14 @@ export async function getMarket(id) {
 }
 
 export async function listMarkets() {
-  const res = await fetch(`${BASE}/markets/?limit=100`);
+  const res = await fetch(`${BASE}/markets/?limit=500`);
   if (!res.ok) throw new Error(`Markets fetch failed: ${res.status}`);
   const data = await res.json();
   return (data.markets || []).map(m => ({
     id:     m.id,
     q:      m.question,
     cat:    m.category,
-    yes:    Math.round((m.current_odds || 0) * 100),
+    yes:    Math.max(1, Math.min(99, Math.round((m.current_odds || 0.5) * 100))),
     vol:    abbr(m.volume || 0),
     status: 'info',
     advice: '',
