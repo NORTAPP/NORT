@@ -163,13 +163,18 @@ export async function verifyPayment(proof) {
 
 // ─── PAPER TRADE ─────────────────────────────────────────────────────────────
 
-export async function paperTrade({ marketId, side, amount, price }) {
+export async function paperTrade({ marketId, side, amount, price, question: providedQuestion }) {
   const wallet = getStoredWallet();
-  let question = '';
-  try {
-    const m = await getMarket(marketId);
-    question = m?.q || '';
-  } catch {}
+
+  // Use the question passed in directly — it comes from the signal card the user tapped,
+  // so it's guaranteed correct. Only fall back to a DB fetch if nothing was provided.
+  let question = providedQuestion || '';
+  if (!question) {
+    try {
+      const m = await getMarket(String(marketId));
+      question = m?.q || '';
+    } catch {}
+  }
 
   // Ensure the user/wallet exists in DB before trading
   const userId = (wallet || 'dev_user').toLowerCase();
