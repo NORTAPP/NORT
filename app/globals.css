@@ -1,26 +1,563 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
+/*
+ * globals.css
+ * ═══════════════════════════════════════════════════════════════
+ * Global styles for the NORT landing page.
+ *
+ * STRUCTURE:
+ *   1. CSS custom properties  — design tokens (colours, fonts)
+ *   2. Base reset + body      — box-sizing, scroll, antialiasing
+ *   3. Noise overlay          — fixed film-grain texture on body
+ *   4. Utility classes        — .card, .pill, .btn, .divider
+ *   5. Scroll animations      — .fade-up / .visible + delay helpers
+ *   6. Component styles       — signal-card, feature-card, pricing-card
+ *   7. Navigation             — .nav-blur, .nav-logo, .nav-link
+ *   8. Global keyframes       — float, blink, scroll-x, pulse-accent
+ *   9. Responsive breakpoints — mobile helpers
+ *  10. NortBot section        — chat UI, chips, input, scrollbar
+ *  11. Liquid Ether           — hero background blob keyframes
+ * ═══════════════════════════════════════════════════════════════
+ */
+
+
+/* ── 1. CSS CUSTOM PROPERTIES (Design Tokens) ──────────────────
+ * All colours and font stacks live here.
+ * Change a value once → updates everywhere on the site.
+ *
+ * COLOUR GROUPS:
+ *   --bg-*        Dark navy page/card/panel backgrounds
+ *   --surface-*   Translucent glass surface fills
+ *   --border-*    Border alpha values (dim and bright)
+ *   --text-*      Hierarchy: white → light grey → muted blue-grey
+ *   --accent-*    Primary teal #00C896, dim/glow variants
+ *   --blue-*      Secondary electric blue #1A7FE8 and variants
+ *   --amber/red   Status/warning colours
+ *
+ * FONTS (loaded in layout.js via Google Fonts):
+ *   --font-display  Syne 800       → headlines, logo, stats
+ *   --font-heading  Goldman        → subheadings, badges, tags
+ *   --font-body     Plus Jakarta   → body copy, labels, UI text
+ * ─────────────────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #000000;
+  --bg-1: #0D1428;
+  --bg-2: #080B14;
+  --bg-3: #0A1A3A;
+  --surface: rgba(255,255,255,0.04);
+  --surface-hover: rgba(255,255,255,0.07);
+  --border: rgba(255,255,255,0.08);
+  --border-bright: rgba(255,255,255,0.15);
+  --text: #FFFFFF;
+  --text-2: #E8E8E8;
+  --text-3: #A0A8B8;
+  --accent: #00C896;
+  --accent-2: #0AB88A;
+  --accent-dim: rgba(0,200,150,0.12);
+  --accent-glow: rgba(0,200,150,0.25);
+  --blue: #1A7FE8;
+  --blue-2: #0057CC;
+  --blue-3: #0C3A8A;
+  --blue-dim: rgba(26,127,232,0.12);
+  --amber: #f5a623;
+  --red: #ff6b6b;
+  --font-display: 'Syne', sans-serif;
+  --font-heading: 'Goldman', sans-serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+/* ── 2. BASE RESET + BODY ──────────────────────────────────────
+ * Universal box-sizing so padding/border never cause overflow.
+ * overflow-x:hidden prevents horizontal scroll from animated
+ * blobs that extend beyond the viewport edges.
+ * -webkit-font-smoothing: antialiased sharpens text on macOS.
+ * ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text-2);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ── 3. NOISE TEXTURE OVERLAY ──────────────────────────────────
+ * Fixed pseudo-element covering the entire page viewport.
+ * Uses an inline SVG with feTurbulence (fractalNoise, 0.9 freq)
+ * to generate film-grain texture — adds organic depth to flat
+ * dark backgrounds without any image assets.
+ *
+ * pointer-events:none  → never blocks clicks or hovers
+ * z-index:9999         → floats above all content (purely visual)
+ * opacity:0.4          → very subtle; raise toward 1.0 to strengthen
+ *
+ * To disable: comment out this rule entirely.
+ * ─────────────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.4;
+}
+
+/* Font helper classes — apply display/heading fonts to any element */
+.font-display { font-family: var(--font-display); }
+.font-heading { font-family: var(--font-heading); }
+/* All heading tags default to the display font with tight tracking */
+h1,h2,h3,h4 { font-family: var(--font-display); color: var(--text); letter-spacing: -0.02em; }
+
+/* ── 4. SHARED UTILITY CLASSES ─────────────────────────────────
+ * Reusable building blocks used across all sections.
+ * ─────────────────────────────────────────────────────────── */
+
+/* .card — base glass-surface card. Used as a generic container.
+ * Hover brightens border and background slightly.                */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  transition: border-color 0.3s, background 0.3s;
+}
+.card:hover { border-color: var(--border-bright); background: var(--surface-hover); }
+
+/* .pill — small rounded label/badge (e.g. "Features", "Pricing").
+ * .pill-accent variant: teal border + teal text for highlighted pills. */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 999px;
+  font-size: 11px; font-family: var(--font-display);
+  letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
+  border: 1px solid #3A5080;
+  background: #1A2540; color: var(--text-2);
+}
+.pill-accent { border-color: rgba(0,200,150,0.3); background: rgba(0,200,150,0.1); color: var(--accent); }
+
+/* .btn — base interactive button/link.
+ * Always pair with a variant:
+ *   .btn-primary  teal→blue gradient + teal glow box-shadow
+ *   .btn-ghost    dark navy fill + navy border, no gradient
+ * hover: shifts up 1px (translateY) for a press-lift feel.       */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 24px; border-radius: 10px;
+  font-family: var(--font-display); font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s; border: none; text-decoration: none;
+  letter-spacing: 0.01em;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--blue));
+  color: #fff;
+  /* double box-shadow: outer glow + thin ring to frame the gradient */
+  box-shadow: 0 0 24px var(--accent-glow), 0 0 0 1px rgba(0,200,150,0.3);
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--accent-2), var(--blue-2));
+  box-shadow: 0 0 32px var(--accent-glow), 0 4px 16px rgba(0,200,150,0.2);
+  transform: translateY(-1px);
+}
+.btn-ghost {
+  background: #1A2540; color: var(--text-2);
+  border: 1px solid #3A5080;
+}
+.btn-ghost:hover { background: #1E2D4D; color: var(--text); transform: translateY(-1px); }
+
+/* .divider — full-width 1px horizontal rule matching border colour */
+.divider { width: 100%; height: 1px; background: var(--border); }
+
+/* ── 5. SCROLL ANIMATIONS ──────────────────────────────────────
+ * Elements with .fade-up start invisible and shifted 28px down.
+ * ScrollAnimations.js attaches an IntersectionObserver which
+ * adds .visible when the element enters the viewport.
+ * The CSS transition then animates opacity + translateY to their
+ * final values over 0.8s using a spring-like cubic-bezier curve.
+ *
+ * .fade-up-delay-N: stagger siblings by 0.1s increments so cards
+ * in a grid animate in sequence rather than all at once.
+ *
+ * cubic-bezier(0.16, 1, 0.3, 1) — fast start, slow deceleration
+ * (same easing as iOS spring animations).
+ * ─────────────────────────────────────────────────────────── */
+.fade-up {
+  opacity: 0; transform: translateY(28px);
+  transition: opacity 0.8s cubic-bezier(0.16,1,0.3,1), transform 0.8s cubic-bezier(0.16,1,0.3,1);
+}
+.fade-up.visible { opacity: 1; transform: translateY(0); }
+.fade-up-delay-1 { transition-delay: 0.1s; }
+.fade-up-delay-2 { transition-delay: 0.2s; }
+.fade-up-delay-3 { transition-delay: 0.3s; }
+.fade-up-delay-4 { transition-delay: 0.4s; }
+.fade-up-delay-5 { transition-delay: 0.5s; }
+
+/* ── 6. COMPONENT STYLES ───────────────────────────────────────
+ * Section-specific classes applied directly in JSX.
+ * ─────────────────────────────────────────────────────────── */
+
+/* .orb — large blurred circle for ambient section glow effects.
+ * filter:blur(80px) spreads colour into a soft diffuse cloud.
+ * Used in Hero background + Footer CTA. Always pointerEvents:none. */
+.orb {
+  position: absolute; border-radius: 50%;
+  filter: blur(80px); pointer-events: none;
+}
+
+/* .signal-card — prediction market card in the Hero dashboard grid.
+ * ::before pseudo-element: 2px coloured top border accent line
+ *   (teal→blue gradient) visible as a highlight at the card top.
+ * hover: card lifts 2px (translateY) + teal border glow appears.
+ * overflow:hidden clips the ::before gradient to the card shape.   */
+.signal-card {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px;
+  transition: border-color 0.3s, transform 0.3s;
+  cursor: pointer; position: relative; overflow: hidden;
+}
+.signal-card:hover { border-color: rgba(0,200,150,0.25); transform: translateY(-2px); }
+.signal-card::before {
+  content:''; position:absolute; inset-x:0; top:0; height:2px;
+  background: linear-gradient(90deg, var(--accent), var(--blue));
+  border-radius: 12px 12px 0 0;
+}
+
+/* .feature-card — the 6 feature cards in the Features section.
+ * .icon-wrap: 44×44px icon container with dark background + bright border.
+ * hover: lifts 4px + deep drop shadow for a floating card effect.          */
+.feature-card {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: 16px; padding: 28px;
+  transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
+  position: relative; overflow: hidden;
+}
+.feature-card:hover {
+  border-color: var(--border-bright); transform: translateY(-4px);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}
+.feature-card .icon-wrap {
+  width: 44px; height: 44px; border-radius: 10px;
+  background: var(--bg-2); border: 1px solid var(--border-bright);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 20px;
+}
+
+/* .pricing-card — the three pricing tier cards.
+ * .featured variant: teal ::before top-border line + subtle teal bg tint.
+ * All cards: hover lifts 4px.
+ * flex-direction:column allows the CTA button to always sit at the bottom
+ * regardless of how many feature list items the card has.                  */
+.pricing-card {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: 20px; padding: 32px; position: relative;
+  overflow: hidden; display: flex; flex-direction: column;
+  transition: border-color 0.3s, transform 0.3s;
+}
+.pricing-card:hover { transform: translateY(-4px); }
+.pricing-card.featured {
+  border-color: rgba(0,200,150,0.3);
+  background: linear-gradient(180deg, rgba(0,200,150,0.04) 0%, var(--bg-1) 50%);
+}
+/* 1px top highlight line on featured card — fades out left and right */
+.pricing-card.featured::before {
+  content: ''; position: absolute; inset-x: 0; top: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+/* ── 7. NAVIGATION ─────────────────────────────────────────────
+ * .nav-blur: frosted glass effect for the fixed top navbar.
+ *   backdrop-filter:blur + saturate makes content behind it glow.
+ * .nav-logo: logo text + blinking dot — flex row, tight letter-spacing.
+ * .nav-logo-dot: pulsing teal circle, uses CSS box-shadow for the glow.
+ * .nav-link: muted text links — transition to white on hover.
+ * ─────────────────────────────────────────────────────────── */
+.nav-blur {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  background: rgba(8,11,20,0.9);
+  border-bottom: 1px solid var(--border);
+}
+.nav-logo {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-display); font-weight: 800; font-size: 20px;
+  color: var(--text); letter-spacing: -0.03em; text-decoration: none;
+}
+.nav-logo-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 10px var(--accent); flex-shrink: 0;
+}
+.nav-link {
+  font-size: 14px; color: var(--text-3); text-decoration: none;
+  transition: color 0.2s; font-family: var(--font-body);
+}
+.nav-link:hover { color: var(--text); }
+
+/* ── 8. GLOBAL KEYFRAME ANIMATIONS ────────────────────────────
+ *
+ * @float        — gentle up/down bob (-8px over 6s).
+ *                 Used on hero elements, bot avatar, etc.
+ *
+ * @pulse-accent — expanding box-shadow ring that fades out.
+ *                 Creates a "sonar ping" glow effect on teal elements.
+ *
+ * @blink        — opacity pulse 1 → 0.3 → 1 over 2s.
+ *                 Used on the live dot in hero eyebrow and ticker.
+ *
+ * @scroll-x     — infinite left translate by exactly -50%.
+ *                 Used on .ticker-track. The -50% works because the
+ *                 track contains the items duplicated twice, so at
+ *                 the halfway point the visual content repeats.
+ *
+ * Helper classes that apply the above animations:
+ *   .animate-float   → float 6s ease-in-out infinite
+ *   .animate-blink   → blink 2s ease-in-out infinite
+ *   .ticker-track    → scroll-x 30s linear infinite
+ *                       (hover pauses it via animation-play-state)
+ * ─────────────────────────────────────────────────────────── */
+@keyframes float           { 0%,100% { transform: translateY(0px); }   50% { transform: translateY(-8px); } }
+/* nort-bot-float: slow hover bob for the Spline robot panel (up 12px over 5s) */
+@keyframes nort-bot-float  { 0%,100% { transform: translateY(0px); }   50% { transform: translateY(-12px); } }
+@keyframes pulse-accent    { 0%,100% { box-shadow: 0 0 0 0 var(--accent-glow); } 50% { box-shadow: 0 0 0 8px transparent; } }
+@keyframes blink        { 0%,100% { opacity:1; }  50% { opacity:0.3; } }
+@keyframes scroll-x     { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
+.animate-float  { animation: float 6s ease-in-out infinite; }
+.animate-blink  { animation: blink 2s ease-in-out infinite; }
+.ticker-track   { animation: scroll-x 30s linear infinite; }
+.ticker-track:hover { animation-play-state: paused; } /* pause on mouse hover */
+
+/* ── 9. RESPONSIVE BREAKPOINTS ────────────────────────────────
+ * .hidden-mobile: hides nav links on small screens (< 768px).
+ *   Used in Navbar.js to collapse the desktop link group.
+ * .signal-card.md-only: additional signal cards hidden on mobile
+ *   to keep the hero dashboard from overflowing on small screens.
+ * ─────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .hidden-mobile { display: none !important; }
+}
+@media (max-width: 640px) {
+  .signal-card.md-only { display: none; }
+}
+
+
+/* ── 10. NORT BOT SECTION (NortBot.js) ─────────────────────────
+ * All styles for the two-panel chat section.
+ * ─────────────────────────────────────────────────────────── */
+
+/* .nort-bot-grid — two equal columns side-by-side on desktop.
+ * Below 1023px: single column, explicit heights for each panel
+ * so the spline panel and chat panel stack cleanly on mobile.   */
+.nort-bot-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  height: 580px;
+}
+@media (max-width: 1023px) {
+  .nort-bot-grid { grid-template-columns: 1fr; height: auto; }
+  #nort-spline-panel { height: 360px; }
+  #nort-chat-panel   { height: 540px; }
+}
+
+/* Chat bubble entrance animation — slides up + fades in from below.
+ * Applied to each message div when it's added to the DOM.
+ * cubic-bezier(0.16,1,0.3,1) = fast start, gentle deceleration.  */
+@keyframes chat-bubble-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+.chat-bubble-anim { animation: chat-bubble-in 0.45s cubic-bezier(0.16,1,0.3,1) both; }
+
+/* Typing indicator dots — 3 dots that bounce sequentially.
+ * Each dot has a different animation-delay (0s, 0.2s, 0.4s)
+ * applied via inline style in NortBot.js to create the wave.    */
+@keyframes nort-typing-dot {
+  0%,80%,100% { opacity: 0.2; transform: translateY(0);    }
+  40%         { opacity: 1;   transform: translateY(-3px); }
+}
+
+/* Spline panel live badge — expanding ring pulse around the green dot.
+ * scale(1.8) + opacity:0 gives the "sonar ping" ripple effect.    */
+@keyframes pulse-ring-nort {
+  0%   { transform: scale(1);   opacity: 0.6; }
+  100% { transform: scale(1.8); opacity: 0;   }
+}
+
+/* .nort-chip — quick-action prompt chips above the input field.
+ * hover: teal border + teal text + faint teal background tint.   */
+.nort-chip {
+  font-size: 10px; font-family: 'Space Grotesk', monospace;
+  color: #71717a; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid rgba(63,63,70,0.6); background: rgba(39,39,42,0.4);
+  cursor: pointer; transition: all 0.2s ease; white-space: nowrap;
+}
+.nort-chip:hover {
+  border-color: rgba(0,229,176,0.4); color: #00e5b0;
+  background: rgba(0,229,176,0.05);
+}
+
+/* .nort-send-btn — gradient teal→blue send button.
+ * hover: scales up 8% + stronger glow shadow.
+ * active: scales down 4% for tactile press feedback.             */
+.nort-send-btn {
+  width: 36px; height: 36px; border-radius: 10px;
+  border: none; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #00e5b0, #0090ff);
+  box-shadow: 0 0 20px rgba(0,229,176,0.3);
+  transition: all 0.2s ease;
+}
+.nort-send-btn:hover  { transform: scale(1.08); box-shadow: 0 0 28px rgba(0,229,176,0.45); }
+.nort-send-btn:active { transform: scale(0.96); }
+
+/* .nort-input — transparent text field inside the input wrapper.
+ * placeholder colour matches the dark zinc input background.     */
+.nort-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  font-size: 13px; font-family: 'Space Grotesk', monospace; color: #e4e4e7;
+}
+.nort-input::placeholder { color: #3f3f46; }
+
+/* .nort-input-wrap — the container for input + send button.
+ * :focus-within brightens the border when the field is focused.  */
+.nort-input-wrap {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 12px;
+  border: 1px solid rgba(63,63,70,0.6); background: #111820;
+  transition: border-color 0.2s;
+}
+.nort-input-wrap:focus-within { border-color: rgba(0,229,176,0.3); }
+
+/* Custom narrow scrollbar for the chat messages area.
+ * 3px wide, transparent track, zinc thumb — clean and unobtrusive. */
+#nort-chat-panel ::-webkit-scrollbar       { width: 3px; }
+#nort-chat-panel ::-webkit-scrollbar-track { background: transparent; }
+#nort-chat-panel ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 2px; }
+
+
+/* ── 11. LIQUID ETHER — Hero Background Blob Animations ────────
+ * Three keyframe animations for the LiquidEther blobs in Hero.js.
+ * Each blob uses translate(X%, Y%) + scale() so it drifts across
+ * the section and breathes in size simultaneously.
+ *
+ * WHY PERCENTAGES?
+ * % values in translate are relative to the element's own size.
+ * Since blobs are 45–75vw, a 12% translate = ~6–9vw of movement —
+ * enough to be clearly visible but not jarring.
+ *
+ * WHY DIFFERENT DURATIONS (18s / 22s / 26s / 30s)?
+ * Prime-ish numbers prevent the blobs from syncing up and moving
+ * together. Asynchronous movement creates the organic "liquid" feel.
+ *
+ * SCALE RANGE (0.90–1.14):
+ * The subtle breathing (scale oscillation) makes blobs feel alive.
+ * At scale 1.14 a 70vw blob temporarily becomes ~80vw, expanding
+ * the light pool before contracting back.
+ *
+ * Blob 4 in LiquidEther runs ether-1 in `reverse` direction so it
+ * travels the opposite path to blob 1 — crossing paths create
+ * richer colour mixing at the intersection points.
+ *
+ * TO ADJUST MOVEMENT:
+ *   More dramatic  → increase translate % values (e.g. 20% → 35%)
+ *   More subtle    → decrease translate % values (e.g. 12% → 6%)
+ *   Faster         → lower the animation duration in Hero.js
+ *   Slower/calmer  → raise the animation duration in Hero.js
+ * ─────────────────────────────────────────────────────────── */
+
+/* ether-1: teal blob, drifts down-right then sweeps back */
+@keyframes ether-1 {
+  0%   { transform: translate(0px, 0px)    scale(1.00); }
+  25%  { transform: translate(12%, 18%)    scale(1.12); }
+  50%  { transform: translate(22%, 8%)     scale(0.93); }
+  75%  { transform: translate(8%, 25%)     scale(1.08); }
+  100% { transform: translate(0px, 0px)    scale(1.00); }
+}
+
+/* ether-2: blue blob, drifts inward from the right edge */
+@keyframes ether-2 {
+  0%   { transform: translate(0px, 0px)    scale(1.00); }
+  30%  { transform: translate(-15%, 12%)   scale(1.10); }
+  60%  { transform: translate(-8%, 22%)    scale(0.91); }
+  80%  { transform: translate(-18%, 6%)    scale(1.06); }
+  100% { transform: translate(0px, 0px)    scale(1.00); }
+}
+
+/* ether-3: teal-blue blend blob, drifts upward from bottom */
+@keyframes ether-3 {
+  0%   { transform: translate(0px, 0px)    scale(1.00); }
+  20%  { transform: translate(10%, -16%)   scale(1.14); }
+  50%  { transform: translate(-12%, -10%)  scale(0.90); }
+  70%  { transform: translate(6%, -20%)    scale(1.10); }
+  100% { transform: translate(0px, 0px)    scale(1.00); }
+}
+
+/* ── 12. HOW IT WORKS — Pipeline Section ───────────────────────
+ * Animations for the vertical pipeline spine + step reveals.
+ *
+ * hw-beam     → glowing teal beam that travels down the spine track.
+ *               Starts above the track (-35%) and exits below (340%).
+ *               Duration 3.5s gives a steady flow feel.
+ *
+ * hw-node-pulse → expanding ring that fades out on each step node.
+ *                 Creates a "sonar ping" around the coloured dot.
+ *
+ * .hw-visible → added by IntersectionObserver in HowItWorks.js.
+ *   When a .hw-step gets .hw-visible:
+ *     - The step wrapper fades + slides up (opacity + translateY)
+ *     - .hw-step-copy  fades in with 0.05s delay
+ *     - .hw-step-node  fades in with 0.18s delay
+ *     - .hw-step-card  fades in with 0.3s delay
+ *   This staggers the three sub-elements so copy → node → card
+ *   appear in sequence as the step enters the viewport.
+ *
+ * .hw-header.hw-visible → section heading fades in independently.
+ * ─────────────────────────────────────────────────────────── */
+
+@keyframes hw-beam {
+  0%   { transform: translate(-50%, -35%); opacity: 0; }
+  15%  { opacity: 1; }
+  100% { transform: translate(-50%, 340%); opacity: 0; }
+}
+
+@keyframes hw-node-pulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  100% { transform: scale(1.8); opacity: 0;    }
+}
+
+/* Step wrapper becomes visible */
+.hw-step.hw-visible        { opacity: 1 !important; transform: translateY(0) !important; }
+
+/* Sub-elements reveal with staggered delays */
+.hw-step.hw-visible .hw-step-copy  { opacity: 1 !important; transform: translateY(0) !important; }
+.hw-step.hw-visible .hw-step-node  { opacity: 1 !important; }
+.hw-step.hw-visible .hw-step-card  { opacity: 1 !important; transform: translateY(0) !important; }
+
+/* Section header reveal */
+.hw-header.hw-visible { opacity: 1 !important; transform: translateY(0) !important; }
+
+/* Mobile: stack single column, spine moves to left edge */
+@media (max-width: 767px) {
+  .hw-step {
+    grid-template-columns: 1fr !important;
+    padding-left: 56px !important;
+  }
+  .hw-step-copy, .hw-step-card {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    text-align: left !important;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .hw-step, .hw-step-copy, .hw-step-node, .hw-step-card, .hw-header {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+    animation: none !important;
+  }
 }

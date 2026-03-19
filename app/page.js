@@ -1,65 +1,61 @@
-import Image from "next/image";
+/**
+ * page.js
+ * ─────────────────────────────────────────────
+ * The home page. Assembles all section components
+ * in the correct order top-to-bottom.
+ *
+ * Sections (in order):
+ *  1. ScrollAnimations — invisible, runs the IntersectionObserver
+ *  2. Navbar           — fixed top nav
+ *  3. Hero             — headline, CTA, signal dashboard preview, ticker
+ *  4. Features         — 6-card feature grid
+ *  5. HowItWorks       — 3-step walkthrough with UI previews
+ *  6. NortBot          — Spline 3D robot + live chat UI
+ *  7. Pricing          — 3 tier cards with monthly/hourly toggle
+ *  8. Footer           — final CTA, links, copyright
+ *
+ * To reorder: move the components below.
+ * To hide a section: comment it out.
+ * ─────────────────────────────────────────────
+ */
+import Navbar         from './components/Navbar';
+import Hero           from './components/Hero';
+import Features       from './components/Features';
+import HowItWorks     from './components/HowItWorks';
+import NortBot        from './components/NortBot';
+import Pricing        from './components/Pricing';
+import Footer         from './components/Footer';
+import ScrollAnimations from './components/ScrollAnimations';
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+    <>
+      {/* ScrollAnimations: invisible — runs the IntersectionObserver
+          that triggers .fade-up animations as elements scroll into view. */}
+      <ScrollAnimations />
+
+      {/* Fixed pill navbar — always visible at the top */}
+      <Navbar />
+
+      <main>
+        {/* 1. Hero: full-screen intro, dashboard preview, live ticker */}
+        <Hero />
+
+        {/* 2. Features: 6-card grid — what NORT does */}
+        <Features />
+
+        {/* 3. How It Works: 3-step walkthrough with signal/analysis/trade previews */}
+        <HowItWorks />
+
+        {/* 4. NortBot: Spline 3D robot (left) + interactive chat UI (right) */}
+        <NortBot />
+
+        {/* 5. Pricing: Free / Pro / Elite with monthly↔hourly toggle */}
+        <Pricing />
       </main>
-    </div>
+
+      {/* Footer: CTA block + links + copyright */}
+      <Footer />
+    </>
   );
 }
