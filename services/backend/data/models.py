@@ -111,7 +111,55 @@ class WalletConfig(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+from sqlmodel import JSON, Column
+
+# 6. Conversation Table
+class Conversation(SQLModel, table=True):
+    """
+    Stores the full chat history per user per market session.
+    Messages are stored as a JSONB array: [{role, content, timestamp}]
+    The orchestrator loads the last N messages as a sliding window.
+    """
+    __tablename__ = "conversations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    telegram_user_id: str = Field(index=True)
+    market_id: str = Field(index=True)
+    # Stored as JSON array: [{"role": "user|assistant", "content": "...", "ts": "..."}]
+    messages: list = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+# 7. UserPermission Table
+class UserPermission(SQLModel, table=True):
+    """
+    Auto-trade permission settings per user.
+    These are the HARD LIMITS the AutoTradeEngine enforces in pure Python
+    — the AI cannot override these values.
+    """
+    __tablename__ = "user_permissions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    telegram_user_id: str = Field(index=True, unique=True)
+
+    # Auto-trade master switch
+    auto_trade_enabled: bool = Field(default=False)
+
+    # Trade mode: "paper" (no money moves) or "real" (live blockchain trade)
+    trade_mode: str = Field(default="paper")
+
+    # Hard bet size cap — AutoTradeEngine will NEVER exceed this even if AI says higher
+    max_bet_size: float = Field(default=10.0)   # in USDC
+
+    # Minimum confidence before AutoTradeEngine fires
+    # 0.75 for solo users, 0.80 enforced for copy-trade leaders
+    min_confidence: float = Field(default=0.75)
+
+    # Language preference for advice output
+    preferred_language: str = Field(default="en")  # "en" or "sw"
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 

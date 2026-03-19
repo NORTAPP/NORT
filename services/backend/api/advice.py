@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 load_dotenv()
 
+from services.agent.orchestrator import run_orchestrator
 from services.agent.prompt_templates import ADVICE_SYSTEM_PROMPT
 from services.backend.data.database import engine
 from services.backend.data.models import Market, AISignal
@@ -143,7 +144,7 @@ Return JSON only. The market_id field must be exactly: {market_id}
 """
 
     payload = {
-        "model": "anthropic/claude-3-haiku",
+        "model": "llama-3.3-70b-versatile",
         "messages": [
             {"role": "system", "content": ADVICE_SYSTEM_PROMPT},
             {"role": "user",   "content": user_message}
@@ -181,10 +182,9 @@ Return JSON only. The market_id field must be exactly: {market_id}
 async def debug_openclaw():
     market_question = "Will MicroStrategy sell any Bitcoin in 2025?"
     search_context = await search_prefetch(market_question)
-    raw = await call_openclaw(
+    raw = await run_orchestrator(
         market_id="debug",
-        market_question=market_question,
-        market_data={"debug": True},
+        market_data={"question": market_question},
         market_signal={},
         search_context=search_context
     )
@@ -341,13 +341,14 @@ async def get_advice(request: AdviceRequest):
         f"tavily_context: {search_context['queries']['context']}"
     ]
 
-    # 4. Send everything to OpenClaw in one enriched prompt
-    raw_response = await call_openclaw(
+    # 4. Send everything to the multi-agent Orchestrator
+    raw_response = await run_orchestrator(
         market_id=request.market_id,
-        market_question=market_question,
         market_data=market_data,
         market_signal=market_signal,
-        search_context=search_context
+        search_context=search_context,
+        telegram_id=request.telegram_id,
+        premium=request.premium
     )
 
     print(f"[Agent] Raw response: {raw_response}")
