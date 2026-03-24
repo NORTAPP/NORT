@@ -1,3 +1,4 @@
+// next.config.js in your Main NORT Repo
 /** @type {import('next').NextConfig} */
 const path = require('path');
 
@@ -7,9 +8,10 @@ const nextConfig = {
   },
 
   async rewrites() {
+    // DO NOT include a rewrite for source: '/' here. The middleware handles it.
     return [
       {
-        // Keep this! It's the "bridge" for the landing page's CSS/JS
+        // This is necessary to bridge the landing page assets (CSS/JS)
         source: '/_next/:path*',
         destination: 'https://nort-landing-nine.vercel.app/_next/:path*',
       },
