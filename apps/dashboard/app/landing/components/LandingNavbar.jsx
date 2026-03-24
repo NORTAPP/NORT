@@ -5,6 +5,35 @@ import { usePrivy } from '@privy-io/react-auth';
 export default function LandingNavbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const { login, authenticated, ready } = usePrivy();
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  // Handler for Get Started/Go to App
+  const handleGetStarted = async () => {
+    if (!ready) return;
+    if (authenticated) {
+      if (document.cookie.includes('nort_auth=true') && localStorage.getItem('walletAddress')) {
+        window.location.href = 'https://nortapp.online';
+      } else {
+        setLoggingIn(true);
+        setTimeout(() => {
+          window.location.href = 'https://nortapp.online';
+        }, 500);
+      }
+    } else {
+      setLoggingIn(true);
+      await login();
+      const checkAuth = () => ready && authenticated && document.cookie.includes('nort_auth=true') && localStorage.getItem('walletAddress');
+      let tries = 0;
+      const waitForAuth = (resolve) => {
+        if (checkAuth()) return resolve();
+        if (tries++ > 20) return resolve();
+        setTimeout(() => waitForAuth(resolve), 100);
+      };
+      await new Promise(waitForAuth);
+      setLoggingIn(false);
+      window.location.href = 'https://nortapp.online';
+    }
+  };
 
   return (
     <header className="l-nav-blur" style={{ position:'fixed', top:0, left:0, right:0, zIndex:50 }}>
@@ -21,15 +50,15 @@ export default function LandingNavbar() {
         </nav>
 
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <a href="https://docs-nortapp.online" target="_blank" rel="noopener noreferrer"
+          <a href="https://docs.nortapp.online" target="_blank" rel="noopener noreferrer"
             className="l-btn l-btn-ghost" style={{ padding:'8px 18px', fontSize:13 }}>Docs</a>
           <button
             className="l-btn l-btn-primary"
-            style={{ padding:'8px 18px', fontSize:13, border:'none', cursor:'pointer' }}
-            onClick={login}
-            disabled={!ready}
+            style={{ padding:'8px 18px', fontSize:13, border:'none', cursor:!ready||loggingIn?'not-allowed':'pointer', opacity:loggingIn?0.7:1 }}
+            onClick={handleGetStarted}
+            disabled={!ready || loggingIn}
           >
-            {ready && authenticated ? 'Go to App' : 'Start Trading Free'}
+            {loggingIn ? 'Connecting...' : (ready && authenticated ? 'Go to App' : 'Start Trading Free')}
           </button>
           {/* Hamburger */}
           <button

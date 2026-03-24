@@ -48,6 +48,9 @@ export function useRealAuth() {
       setAuthCookie();
     } else {
       clearAuthCookie();
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem('nort_redirected');
+      }
     }
   }, [privyReady, authenticated, tgUser]);
 
@@ -114,6 +117,7 @@ export function useRealAuth() {
       window.localStorage.removeItem("walletAddress");
       window.localStorage.removeItem("nort_auth");
       window.localStorage.removeItem("nort_username");
+      window.sessionStorage.removeItem('nort_redirected');
     } catch {}
     window.location.href = "/";
   };

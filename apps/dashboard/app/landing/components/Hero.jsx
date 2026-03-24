@@ -13,8 +13,9 @@ const TICKER_ITEMS = [
 ];
 
 export default function Hero() {
-  const { login, ready } = usePrivy();
+  const { login, authenticated, ready } = usePrivy();
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -23,6 +24,37 @@ export default function Hero() {
     mq.addEventListener('change', h);
     return () => mq.removeEventListener('change', h);
   }, []);
+
+  // Handler for Get Started/Go to App
+  const handleGetStarted = async () => {
+    if (!ready) return;
+    if (authenticated) {
+      // Double-check cookie/localStorage
+      if (document.cookie.includes('nort_auth=true') && localStorage.getItem('walletAddress')) {
+        window.location.href = 'https://nortapp.online';
+      } else {
+        setLoggingIn(true);
+        // Wait a moment for storage/cookie to sync
+        setTimeout(() => {
+          window.location.href = 'https://nortapp.online';
+        }, 500);
+      }
+    } else {
+      setLoggingIn(true);
+      await login();
+      // Wait for auth state to update
+      const checkAuth = () => ready && authenticated && document.cookie.includes('nort_auth=true') && localStorage.getItem('walletAddress');
+      let tries = 0;
+      const waitForAuth = (resolve) => {
+        if (checkAuth()) return resolve();
+        if (tries++ > 20) return resolve(); // 2s timeout
+        setTimeout(() => waitForAuth(resolve), 100);
+      };
+      await new Promise(waitForAuth);
+      setLoggingIn(false);
+      window.location.href = 'https://nortapp.online';
+    }
+  };
 
   return (
     <section style={{ position:'relative', minHeight:'100vh', display:'flex', flexDirection:'column',
@@ -74,11 +106,11 @@ export default function Hero() {
           <div style={{ display:'flex', gap:12, justifyContent:'center', flexWrap:'wrap', marginBottom:40 }}>
             <button
               className="l-btn l-btn-primary"
-              style={{ border:'none', cursor:'pointer' }}
-              onClick={login}
-              disabled={!ready}
+              style={{ border:'none', cursor:!ready||loggingIn?'not-allowed':'pointer', opacity:loggingIn?0.7:1 }}
+              onClick={handleGetStarted}
+              disabled={!ready || loggingIn}
             >
-              Start Trading Free
+              {loggingIn ? 'Connecting...' : (ready && authenticated ? 'Go to App' : 'Start Trading Free')}
               <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14m0 0l-7-7m7 7l-7 7"/>
               </svg>

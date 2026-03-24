@@ -126,8 +126,8 @@ export default function LiquidEther({
         this.renderer.domElement.style.width = '100%';
         this.renderer.domElement.style.height = '100%';
         this.renderer.domElement.style.display = 'block';
-        this.clock = new THREE.Clock();
-        this.clock.start();
+        this.clock = new THREE.Timer();
+        this.clock.connect(document);
       }
       resize() {
         if (!this.container) return;
@@ -138,6 +138,7 @@ export default function LiquidEther({
         if (this.renderer) this.renderer.setSize(this.width, this.height, false);
       }
       update() {
+        this.clock.update();
         this.delta = this.clock.getDelta();
         this.time += this.delta;
       }
