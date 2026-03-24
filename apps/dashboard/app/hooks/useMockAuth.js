@@ -31,6 +31,8 @@ export function useMockAuth() {
     setIsAuthed(false);
     if (typeof window !== "undefined") {
       localStorage.removeItem("nort_auth");
+      window.sessionStorage.removeItem('nort_redirected');
+      window.location.href = "/";
     }
   }, []);
 
