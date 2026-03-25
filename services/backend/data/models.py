@@ -253,3 +253,38 @@ class RealTrade(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+# 13. AuditLog Table  ← Task 4: request audit trail + rate limiting + feedback loop
+class AuditLog(SQLModel, table=True):
+    """
+    Records every call to the /agent/advice endpoint.
+
+    Powers:
+      - Rate limiting (Task 3): count rows per user in last hour
+      - Feedback loop (Task 6): outcome_correct updated when trade closes
+      - Dashboard logs page: full activity trail per user
+      - Abuse detection: flag users who spam the endpoint
+    """
+    __tablename__ = "audit_logs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Who called it
+    telegram_user_id: Optional[str] = Field(default=None, index=True)
+
+    # What they called
+    action: str = Field(default="advice")           # e.g. "advice", "debug"
+    market_id: Optional[str] = Field(default=None)
+
+    # Tier
+    premium: bool = Field(default=False)
+
+    # Result
+    success: bool = Field(default=True)
+    response_time_ms: Optional[int] = Field(default=None)   # wall-clock ms for the full pipeline
+
+    # Feedback loop (Task 6): set when the corresponding trade closes
+    outcome_correct: Optional[bool] = Field(default=None)   # True=win, False=loss, None=pending/no trade
+
+    # Timestamp
+    created_at: datetime = Field(default_factory=datetime.utcnow)

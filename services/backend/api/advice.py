@@ -2,6 +2,8 @@ import json
 import httpx
 import os
 import asyncio
+import time
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -17,7 +19,7 @@ from services.agent.orchestrator import run_orchestrator
 from services.agent.prompt_templates import ADVICE_SYSTEM_PROMPT
 from services.backend.core.x402_verifier import has_premium_access, payment_required_payload
 from services.backend.data.database import engine
-from services.backend.data.models import Market, AISignal
+from services.backend.data.models import Market, AISignal, AuditLog
 
 router = APIRouter(prefix="/agent", tags=["Agent"])
 
@@ -198,7 +200,13 @@ async def debug_openrouter():
 # LLM Response Parser
 # ─────────────────────────────────────────────────────────────
 
-def parse_response(raw: str, market_id: str, tool_calls_used: list[str]) -> AdviceResponse:
+def parse_response(
+    raw: str,
+    market_id: str,
+    tool_calls_used: list[str],
+    technical_momentum: str = "NEUTRAL",
+    sentiment_label: str = "Neutral",
+) -> AdviceResponse:
     cleaned = raw.strip()
 
     if cleaned.startswith("```"):
@@ -232,13 +240,26 @@ def parse_response(raw: str, market_id: str, tool_calls_used: list[str]) -> Advi
     if suggested not in valid_plans:
         suggested = "WAIT"
 
+    confidence = float(data.get("confidence", 0.5))
+
+    # Task 8B: Python confidence cap — AI cannot override this
+    # If Technical momentum and Sentiment disagree, cap at 0.70
+    tech_bullish  = technical_momentum == "BULLISH"
+    tech_bearish  = technical_momentum == "BEARISH"
+    sent_bullish  = sentiment_label == "Bullish"
+    sent_bearish  = sentiment_label == "Bearish"
+    agents_disagree = (tech_bullish and sent_bearish) or (tech_bearish and sent_bullish)
+    if agents_disagree and confidence > 0.70:
+        print(f"[ConfidenceCap] Technical={technical_momentum} vs Sentiment={sentiment_label} — capping {confidence:.2f} → 0.70")
+        confidence = 0.70
+
     return AdviceResponse(
         market_id=market_id,
         summary=data.get("summary", ""),
         why_trending=data.get("why_trending", ""),
         risk_factors=data.get("risk_factors", []),
         suggested_plan=suggested,
-        confidence=float(data.get("confidence", 0.5)),
+        confidence=confidence,
         disclaimer="This is not financial advice. Paper trading only.",
         tool_calls_used=tool_calls_used,
         stale_data_warning=data.get("stale_data_warning")
@@ -310,82 +331,165 @@ def fetch_market_signal(market_id: str) -> dict:
         return {}
 
 # ─────────────────────────────────────────────────────────────
+# Rate Limit Helper  (Task 3)
+# Max 5 advice calls per user per hour, checked against AuditLog
+# ─────────────────────────────────────────────────────────────
+
+RATE_LIMIT_MAX   = 5     # calls per window
+RATE_LIMIT_HOURS = 1     # window size in hours
+
+def check_rate_limit(telegram_id: str) -> None:
+    """
+    Raises HTTP 429 if this user has made >= 5 advice calls in the last hour.
+    Called before any expensive work (Tavily + LLM) so we never burn credits.
+    No-ops for anonymous users (telegram_id is None) to avoid blocking free debug calls.
+    """
+    if not telegram_id:
+        return
+    window_start = datetime.now(timezone.utc) - timedelta(hours=RATE_LIMIT_HOURS)
+    with Session(engine) as session:
+        count = session.exec(
+            select(AuditLog)
+            .where(AuditLog.telegram_user_id == telegram_id)
+            .where(AuditLog.action == "advice")
+            .where(AuditLog.created_at >= window_start)
+        ).all()
+    if len(count) >= RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded: max {RATE_LIMIT_MAX} advice calls per hour. Try again later."
+        )
+
+
+def write_audit_log(
+    telegram_id: Optional[str],
+    market_id: Optional[str],
+    premium: bool,
+    success: bool,
+    response_time_ms: Optional[int],
+    action: str = "advice",
+) -> None:
+    """Writes a single row to audit_logs. Never raises — errors are swallowed."""
+    try:
+        with Session(engine) as session:
+            log = AuditLog(
+                telegram_user_id=telegram_id,
+                action=action,
+                market_id=market_id,
+                premium=premium,
+                success=success,
+                response_time_ms=response_time_ms,
+            )
+            session.add(log)
+            session.commit()
+    except Exception as e:
+        print(f"[AuditLog] Write failed (non-fatal): {e}")
+
+
+# ─────────────────────────────────────────────────────────────
 # MAIN ENDPOINT
 #
 # Flow:
-#   1. Fetch market data + AI signal directly from Neon
-#   2. Run 3 Tavily searches in parallel (news + social + context)
-#   3. Bundle everything into one enriched prompt
-#   4. Send to OpenClaw → single-shot analysis
-#   5. Parse → return AdviceResponse
+#   1. Rate limit check (Task 3)
+#   2. Fetch market data + AI signal directly from Neon
+#   3. Run 3 Tavily searches in parallel (news + social + context)
+#   4. Bundle everything into one enriched prompt
+#   5. Send to the multi-agent Orchestrator
+#   6. Parse → return AdviceResponse
+#   7. Write AuditLog (Task 4)
 # ─────────────────────────────────────────────────────────────
 
 @router.post("/advice", response_model=AdviceResponse)
 async def get_advice(request: AdviceRequest):
     tool_calls_used: list[str] = []
+    start_time = time.monotonic()
+    success = False
 
-    if request.premium and not has_premium_access(request.telegram_id, request.market_id):
-        return JSONResponse(
-            status_code=402,
-            content=payment_required_payload(request.market_id),
+    # Task 3: Rate limit check — before any expensive work
+    check_rate_limit(request.telegram_id)
+
+    try:
+
+        if request.premium and not has_premium_access(request.telegram_id, request.market_id):
+            return JSONResponse(
+                status_code=402,
+                content=payment_required_payload(request.market_id),
+            )
+
+        # 1. Fetch directly from Neon — no localhost calls
+        market_data   = fetch_market_data(request.market_id)
+        market_signal = fetch_market_signal(request.market_id)
+
+        # 2. Extract market question
+        market_question = (
+            market_data.get("question") or
+            market_data.get("summary") or
+            f"prediction market {request.market_id}"
+        ).strip()
+
+        print(f"[Agent] Market {request.market_id}: {market_question}")
+
+        # 3. Run 3 Tavily searches in parallel
+        search_context = await search_prefetch(market_question)
+        tool_calls_used += [
+            f"tavily_news: {search_context['queries']['news']}",
+            f"tavily_social: {search_context['queries']['social']}",
+            f"tavily_context: {search_context['queries']['context']}"
+        ]
+
+        # 4. Send everything to the multi-agent Orchestrator
+        raw_response, technical_result, sentiment_result = await run_orchestrator(
+            market_id=request.market_id,
+            market_data=market_data,
+            market_signal=market_signal,
+            search_context=search_context,
+            telegram_id=request.telegram_id,
+            premium=request.premium,
+            language=request.language
         )
 
-    # 1. Fetch directly from Neon — no localhost calls
-    market_data   = fetch_market_data(request.market_id)
-    market_signal = fetch_market_signal(request.market_id)
+        # 5. Parse → return AdviceResponse (Task 8B: pass agent results for confidence cap)
+        response_obj = parse_response(
+            raw_response,
+            request.market_id,
+            tool_calls_used,
+            technical_momentum=technical_result.get("momentum", "NEUTRAL"),
+            sentiment_label=sentiment_result.get("label", "Neutral"),
+        )
 
-    # 2. Extract market question
-    market_question = (
-        market_data.get("question") or
-        market_data.get("summary") or
-        f"prediction market {request.market_id}"
-    ).strip()
+        # 6. Post-translate text fields if Swahili is requested
+        if request.language == "sw":
+            translator = GoogleTranslator(source='en', target='sw')
+            try:
+                response_obj.summary = translator.translate(response_obj.summary)
+                response_obj.why_trending = translator.translate(response_obj.why_trending)
+                response_obj.risk_factors = [translator.translate(rf) for rf in response_obj.risk_factors]
+                response_obj.disclaimer = translator.translate(response_obj.disclaimer)
+                if response_obj.stale_data_warning:
+                    response_obj.stale_data_warning = translator.translate(response_obj.stale_data_warning)
 
-    print(f"[Agent] Market {request.market_id}: {market_question}")
+                # Manually map the ENUM to ensure reliable translation
+                plan_map = {
+                    "BUY YES": "NUNUA NDIYO",
+                    "BUY NO": "NUNUA HAPANA",
+                    "WAIT": "SUBIRI"
+                }
+                if response_obj.suggested_plan in plan_map:
+                    response_obj.suggested_plan = plan_map[response_obj.suggested_plan]
 
-    # 3. Run 3 Tavily searches in parallel
-    search_context = await search_prefetch(market_question)
-    tool_calls_used += [
-        f"tavily_news: {search_context['queries']['news']}",
-        f"tavily_social: {search_context['queries']['social']}",
-        f"tavily_context: {search_context['queries']['context']}"
-    ]
+            except Exception as e:
+                print(f"[Translation Error] Could not translate to Swahili: {e}")
 
-    # 4. Send everything to the multi-agent Orchestrator
-    raw_response = await run_orchestrator(
-        market_id=request.market_id,
-        market_data=market_data,
-        market_signal=market_signal,
-        search_context=search_context,
-        telegram_id=request.telegram_id,
-        premium=request.premium,
-        language=request.language
-    )
+        success = True
+        return response_obj
 
-    # 5. Parse → return AdviceResponse
-    response_obj = parse_response(raw_response, request.market_id, tool_calls_used)
-
-    # 6. Post-translate text fields if Swahili is requested
-    if request.language == "sw":
-        translator = GoogleTranslator(source='en', target='sw')
-        try:
-            response_obj.summary = translator.translate(response_obj.summary)
-            response_obj.why_trending = translator.translate(response_obj.why_trending)
-            response_obj.risk_factors = [translator.translate(rf) for rf in response_obj.risk_factors]
-            response_obj.disclaimer = translator.translate(response_obj.disclaimer)
-            if response_obj.stale_data_warning:
-                response_obj.stale_data_warning = translator.translate(response_obj.stale_data_warning)
-
-            # Manually map the ENUM to ensure reliable translation
-            plan_map = {
-                "BUY YES": "NUNUA NDIYO",
-                "BUY NO": "NUNUA HAPANA",
-                "WAIT": "SUBIRI"
-            }
-            if response_obj.suggested_plan in plan_map:
-                response_obj.suggested_plan = plan_map[response_obj.suggested_plan]
-
-        except Exception as e:
-            print(f"[Translation Error] Could not translate to Swahili: {e}")
-
-    return response_obj
+    finally:
+        # Task 4: Always write audit log, even on unhandled exceptions
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
+        write_audit_log(
+            telegram_id=request.telegram_id,
+            market_id=request.market_id,
+            premium=request.premium,
+            success=success,
+            response_time_ms=elapsed_ms,
+        )

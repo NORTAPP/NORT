@@ -3,7 +3,7 @@
 # This file contains all the scoring logic.
 # It is imported by api/signals.py to power the GET /signals endpoint.
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict
 
 # ─────────────────────────────────────────────
@@ -12,8 +12,9 @@ from typing import List, Dict
 # ─────────────────────────────────────────────
 
 MIN_LIQUIDITY = 1000.0      # Markets below this are too thin to trade
-MOMENTUM_WEIGHT = 0.5       # How much price movement matters in final score
-VOLUME_WEIGHT = 0.5         # How much volume spike matters in final score
+MOMENTUM_WEIGHT = 0.4       # 40% — price movement
+VOLUME_WEIGHT   = 0.4       # 40% — volume spike
+URGENCY_WEIGHT  = 0.2       # 20% — expiry urgency (Task 2)
 
 # Markets with odds outside this range are effectively resolved — no trading value
 MIN_TRADEABLE_ODDS = 0.05   # 5%
@@ -108,12 +109,44 @@ def volume_spike_score(market: Dict) -> float:
 def composite_score(market: Dict) -> float:
     """
     Final ranking score for a market.
-    Weighted combination of momentum and volume spike.
+    Weighted: 40% momentum + 40% volume + 20% expiry urgency.
     Returns a value between 0.0 and 1.0
     """
     m = momentum_score(market)
     v = volume_spike_score(market)
-    return round((MOMENTUM_WEIGHT * m) + (VOLUME_WEIGHT * v), 4)
+    u = expiry_urgency_score(market)
+    return round((MOMENTUM_WEIGHT * m) + (VOLUME_WEIGHT * v) + (URGENCY_WEIGHT * u), 4)
+
+
+# ─────────────────────────────────────────────
+# STEP 4b — EXPIRY URGENCY SCORE  (Task 2)
+# Markets expiring soon are more urgent to act on.
+# Score is 0.0 (far away) to 1.0 (expires in ≤3 days)
+# ─────────────────────────────────────────────
+
+def expiry_urgency_score(market: Dict) -> float:
+    """
+    Scores a market based on how soon it expires.
+    A market expiring tomorrow is more immediately tradeable
+    than one expiring in 3 months — urgency should boost its rank.
+    """
+    expires_at = market.get("expires_at")
+    if not expires_at:
+        return 0.0
+    try:
+        if isinstance(expires_at, str):
+            exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        else:
+            exp = expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        days_left = (exp - datetime.now(timezone.utc)).days
+        if days_left <= 3:  return 1.0
+        if days_left <= 7:  return 0.7
+        if days_left <= 14: return 0.4
+        return 0.0
+    except Exception:
+        return 0.0
 
 
 # ─────────────────────────────────────────────
@@ -125,7 +158,7 @@ def composite_score(market: Dict) -> float:
 def build_reason(market: Dict) -> str:
     """
     Generates a plain-English explanation for why this market ranked.
-    Example output: "Price moved +18% with 3.2x average volume."
+    Example output: "Price moved +18% with 3.2x average volume. Expires in 5 days."
     """
     current = market.get("current_odds", 0.5)
     previous = market.get("previous_odds", current)
@@ -146,7 +179,25 @@ def build_reason(market: Dict) -> str:
     else:
         volume_str = "volume data unavailable"
 
-    return f"{price_str} with {volume_str}."
+    # Expiry urgency note
+    urgency = expiry_urgency_score(market)
+    expires_at = market.get("expires_at")
+    if urgency > 0 and expires_at:
+        try:
+            if isinstance(expires_at, str):
+                exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            else:
+                exp = expires_at
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            days_left = (exp - datetime.now(timezone.utc)).days
+            urgency_str = f" Expires in {days_left} day(s) — act soon."
+        except Exception:
+            urgency_str = ""
+    else:
+        urgency_str = ""
+
+    return f"{price_str} with {volume_str}.{urgency_str}"
 
 
 # ─────────────────────────────────────────────

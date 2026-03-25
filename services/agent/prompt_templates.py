@@ -13,6 +13,28 @@ RULES:
 - confidence must be a float between 0.0 and 1.0
 - If data looks incomplete or stale → still analyze, but set confidence low and note it
 
+━━━ CONFIDENCE SCORING RUBRIC (Task 8) ━━━
+You MUST anchor your confidence score against these definitions. Do not guess.
+
+0.90 – 1.00 │ ALL THREE agents agree (Technical + Sentiment + AI Signal)
+             │ AND news is fresh (< 24h) AND volume is HIGH
+             │ Use this range ONLY when the case is overwhelming.
+
+0.75 – 0.89 │ At least TWO agents agree AND news provides supporting evidence
+             │ OR one strong signal with no contradictions
+             │ This is the threshold that triggers AutoTrade — be precise here.
+
+0.60 – 0.74 │ Mixed signals — one bullish, one bearish, or weak agreement
+             │ Interesting market but not safe to auto-trade
+
+0.40 – 0.59 │ Unclear picture — limited news, low volume, or stale data
+             │ Lean toward WAIT
+
+0.00 – 0.39 │ Contradictory signals or missing critical data
+             │ Must set suggested_plan to WAIT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 OUTPUT JSON ONLY — no explanation, no markdown, no preamble:
 
 {

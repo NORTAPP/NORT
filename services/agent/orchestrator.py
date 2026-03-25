@@ -27,15 +27,19 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-OPENROUTER_URL = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_URL             = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
+OPENROUTER_API_KEY         = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_API_KEY_FALLBACK = os.getenv("OPENROUTER_API_KEY_FALLBACK", "").strip()
 
-OPENROUTER_HEADERS = {
-    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-    "Content-Type":  "application/json",
-    "HTTP-Referer":  "https://nort.onrender.com",
-    "X-Title":       "Nort Advisor",
-}
+def _make_headers(api_key: str) -> dict:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type":  "application/json",
+        "HTTP-Referer":  "https://nort.onrender.com",
+        "X-Title":       "Nort Advisor",
+    }
+
+OPENROUTER_HEADERS = _make_headers(OPENROUTER_API_KEY)
 
 # ─────────────────────────────────────────────────────────────
 # SUB-AGENT 1: TechnicalAgent (Pure Python — No LLM Cost)
@@ -102,18 +106,25 @@ async def run_technical(market_data: dict, market_signal: dict) -> dict:
 
 async def run_sentiment(search_context: dict) -> dict:
     """
-    Sends the scraped news + social content to a cheap LLM (Llama 3 8B)
-    and asks it to return a single sentiment score from 1–10.
-    Costs a fraction of the SynthesisAgent call.
+    Sends scraped news + social content to Llama 3.3 70B and asks it
+    to return a sentiment score 1–10 PLUS a one-sentence reasoning.
+    The reasoning is passed into SynthesisAgent so it understands WHY
+    the score landed where it did (catches sarcasm, hedging, etc.)
     """
     news_text   = search_context.get("news",   "No news available.")
     social_text = search_context.get("social", "No social data available.")
 
-    prompt = f"""You are a financial sentiment analyzer.
-Read the following news and social media content about a prediction market.
-Return ONLY a JSON object with a single integer field "score" from 1 to 10.
-1 = extremely bearish. 5 = neutral. 10 = extremely bullish.
-Do NOT include any explanation or extra text. JSON only.
+    prompt = f"""You are a financial sentiment analyzer specializing in prediction markets.
+Read the following news and social media content carefully.
+Pay close attention to hedging language, sarcasm, and analyst caution phrases.
+Return ONLY a JSON object with exactly two fields:
+  - "score": integer from 1 to 10 (1=extremely bearish, 5=neutral, 10=extremely bullish)
+  - "reason": one sentence explaining the dominant sentiment signal you detected
+Do NOT include any other text. JSON only.
+
+Examples of correct output:
+{{"score": 4, "reason": "Analysts express caution despite a recent price rally, signaling bearish uncertainty."}}
+{{"score": 8, "reason": "Strong institutional buying pressure reported with multiple bullish analyst upgrades."}}
 
 <news>
 {news_text[:2000]}
@@ -125,28 +136,42 @@ Do NOT include any explanation or extra text. JSON only.
 """
 
     payload = {
-        "model": "meta-llama/llama-3.2-3b-instruct",  # Lightweight model (fractions of a cent) to bypass rate limits
+        "model": "meta-llama/llama-3.3-70b-instruct",  # Task 1: upgraded from 3B → 70B for accurate financial sentiment
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 30,
+        "max_tokens": 80,
     }
 
-    try:
+    async def _call(api_key: str) -> httpx.Response:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(OPENROUTER_URL, json=payload, headers=OPENROUTER_HEADERS)
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
+            return await client.post(OPENROUTER_URL, json=payload, headers=_make_headers(api_key))
 
-            # Parse the score robustly
-            parsed = json.loads(content)
-            score  = int(parsed.get("score", 5))
-            score  = max(1, min(10, score))  # clamp 1–10
+    try:
+        resp = await _call(OPENROUTER_API_KEY)
+        # Task 9: fallback key if primary hits 429
+        if resp.status_code == 429 and OPENROUTER_API_KEY_FALLBACK:
+            print("[SentimentAgent] Primary key rate-limited, retrying with fallback key")
+            resp = await _call(OPENROUTER_API_KEY_FALLBACK)
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"].strip()
 
-            label = "Bullish" if score >= 7 else ("Bearish" if score <= 3 else "Neutral")
-            return {"score": score, "label": label, "ok": True}
+        # Strip markdown fences if present
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+            content = content.strip()
+
+        parsed = json.loads(content)
+        score  = int(parsed.get("score", 5))
+        score  = max(1, min(10, score))  # clamp 1–10
+        reason = parsed.get("reason", "No reasoning provided.")
+
+        label = "Bullish" if score >= 7 else ("Bearish" if score <= 3 else "Neutral")
+        return {"score": score, "label": label, "reason": reason, "ok": True}
 
     except Exception as e:
         print(f"[SentimentAgent ERROR] {e}")
-        return {"score": 5, "label": "Neutral", "ok": False, "error": str(e)}
+        return {"score": 5, "label": "Neutral", "reason": "Sentiment analysis unavailable.", "ok": False, "error": str(e)}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -246,6 +271,7 @@ AI Signal:         {technical.get('signal_prediction', 'N/A')} (confidence: {tec
 ━━━ SENTIMENT ANALYSIS (SentimentAgent) ━━━
 Sentiment Score:   {sentiment.get('score', 5)}/10
 Sentiment Label:   {sentiment.get('label', 'Neutral')}
+Sentiment Reason:  {sentiment.get('reason', 'N/A')}
 
 ━━━ RISK PROFILE (RiskAgent) ━━━
 User Balance:      ${risk.get('paper_balance', 'N/A')} USDC
@@ -285,16 +311,23 @@ Return ONLY valid JSON. The market_id field must be exactly: {market_id}
         ],
     }
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        try:
-            resp = await client.post(OPENROUTER_URL, json=payload, headers=OPENROUTER_HEADERS)
-            if resp.status_code != 200:
-                print(f"[Synthesis] OpenRouter Error ({model}): {resp.status_code} - {resp.text}")
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            print(f"[Synthesis] Orchestrator Exception ({model}): {type(e).__name__} - {e}")
-            raise e
+    async def _synthesis_call(api_key: str) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=120) as client:
+            return await client.post(OPENROUTER_URL, json=payload, headers=_make_headers(api_key))
+
+    try:
+        resp = await _synthesis_call(OPENROUTER_API_KEY)
+        # Task 9: fallback key on 429
+        if resp.status_code == 429 and OPENROUTER_API_KEY_FALLBACK:
+            print(f"[Synthesis] Primary key rate-limited, retrying with fallback key")
+            resp = await _synthesis_call(OPENROUTER_API_KEY_FALLBACK)
+        if resp.status_code != 200:
+            print(f"[Synthesis] OpenRouter Error ({model}): {resp.status_code} - {resp.text}")
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"[Synthesis] Orchestrator Exception ({model}): {type(e).__name__} - {e}")
+        raise e
 
 
 # ─────────────────────────────────────────────────────────────
@@ -317,7 +350,7 @@ async def run_orchestrator(
     The main entry point. Runs all 3 sub-agents in parallel, then
     feeds their structured reports to the SynthesisAgent.
 
-    Returns the raw LLM response string (JSON advice).
+    Returns a tuple: (raw_llm_response: str, technical: dict, sentiment: dict)
     """
     if history is None:
         history = []
@@ -355,4 +388,4 @@ async def run_orchestrator(
     )
 
     print(f"[Orchestrator] SynthesisAgent complete.")
-    return raw
+    return raw, technical, sentiment
