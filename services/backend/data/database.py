@@ -4,6 +4,9 @@ from sqlalchemy import text
 
 # Import all models so SQLModel knows about every table
 from services.backend.data.models import (
+    User, Market, AISignal, Payment, Trade,
+    PaperTrade, WalletConfig, LeaderboardSnapshot,
+    BridgeTransaction, RealTrade, PretiumTransaction,
     User, Market, AISignal, Payment, TelegramProfile, Trade,
     PaperTrade, WalletConfig, LeaderboardSnapshot
 )

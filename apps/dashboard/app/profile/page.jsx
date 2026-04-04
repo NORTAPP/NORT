@@ -5,7 +5,8 @@ import { useTelegram } from '@/hooks/useTelegram';
 import { useTradingMode } from '@/components/TradingModeContext';
 import AuthGate from '@/components/AuthGate';
 import Navbar from '@/components/Navbar';
-import { getFullWallet, getTrades, getUserStats, getBridgeHistory, BASE } from '@/lib/api';
+import Link from 'next/link';
+import { getFullWallet, getTrades, getUserStats, getBridgeHistory, getPretiumTransactions, BASE } from '@/lib/api';
 
 export default function ProfilePage() {
   const { user, walletAddress, logout } = useAuth();
@@ -17,6 +18,7 @@ export default function ProfilePage() {
   const [trades, setTrades]         = useState([]);
   const [stats, setStats]           = useState(null);
   const [bridges, setBridges]       = useState([]);
+  const [pretiumTxs, setPretiumTxs]  = useState([]);
   const [loading, setLoading]       = useState(true);
 
   const [dbUsername, setDbUsername]   = useState('');
@@ -43,12 +45,13 @@ export default function ProfilePage() {
   }, [walletAddress]);
 
   useEffect(() => {
-    Promise.all([getFullWallet(), getTrades(), getUserStats(), getBridgeHistory()])
-      .then(([w, t, s, b]) => {
+    Promise.all([getFullWallet(), getTrades(), getUserStats(), getBridgeHistory(), getPretiumTransactions(null, 5)])
+      .then(([w, t, s, b, f]) => {
         setWallet(w);
         setTrades(t);
         setStats(s);
         setBridges(b.bridges || []);
+        setPretiumTxs(f.transactions || []);
       })
       .catch(console.warn)
       .finally(() => setLoading(false));
@@ -271,11 +274,53 @@ export default function ProfilePage() {
             </div>
             {isReal && (
               <div className="settings-item">
-                <div className="settings-label">USDC on Base</div>
+                <div className="settings-label">USDC Balance</div>
                 <div className="settings-value">${(wallet?.realBalanceUsdc ?? 0).toFixed(2)}</div>
               </div>
             )}
           </div>
+
+          {/* ── Deposit / Withdraw Quick Actions ── */}
+          {isReal && (
+            <div className="fu d8" style={{ display: 'flex', gap: 8, marginTop: 8, marginBottom: 4 }}>
+              <Link href="/wallet" style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                padding: '14px 0', borderRadius: 'var(--rsm)',
+                background: 'var(--teal-dim)', border: '1px solid var(--teal-border)',
+                color: 'var(--teal)', fontSize: 13, fontWeight: 600, textDecoration: 'none',
+                fontFamily: 'Plus Jakarta Sans, sans-serif',
+              }}>
+                Deposit / Withdraw
+              </Link>
+            </div>
+          )}
+
+          {/* ── Pretium Transaction History ── */}
+          {isReal && pretiumTxs.length > 0 && (
+            <>
+              <div className="sec-lbl fu d8"><span className="sec-t">M-Pesa Transactions</span><span className="sec-t">{pretiumTxs.length} recent</span></div>
+              <div className="settings-group fu d9">
+                {pretiumTxs.map(tx => (
+                  <div key={tx.transaction_id} className="settings-item">
+                    <div className="settings-label">
+                      {tx.type === 'onramp' ? 'Deposit' : 'Withdraw'} · {tx.type === 'onramp'
+                        ? `KES ${Number(tx.amount_fiat || 0).toLocaleString()}`
+                        : `$${Number(tx.amount_crypto || 0).toFixed(2)}`}
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                        {tx.created_at ? new Date(tx.created_at).toLocaleDateString() : ''}
+                      </div>
+                    </div>
+                    <div className="settings-value" style={{
+                      color: tx.status === 'completed' ? 'var(--green)' : ['failed','expired'].includes(tx.status) ? 'var(--red)' : '#F59E0B',
+                      fontFamily: 'DM Mono,monospace', fontSize: 11,
+                    }}>
+                      {tx.status.toUpperCase()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           {/* ── Logout ── */}
           <div className="settings-group fu d9" style={{ marginTop: 8 }}>

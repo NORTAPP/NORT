@@ -402,6 +402,90 @@ export async function getBridgeHistory() {
   return await res.json();
 }
 
+// ─── PRETIUM (Phase 3 — On-ramp / Off-ramp via Pretium Africa) ──────────────
+
+export async function getPretiumRate(currency = 'KES') {
+  const res = await fetch(`${BASE}/api/pretium/rate?currency=${currency}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Rate fetch failed: ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function createOnramp({ amount, phoneNumber, walletAddress, mobileNetwork = 'Safaricom', chain = 'BASE', asset = 'USDC', fee = 0, telegramUserId = null }) {
+  const res = await fetch(`${BASE}/api/pretium/onramp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      amount: Math.round(amount),
+      phone_number: phoneNumber,
+      wallet_address: walletAddress,
+      mobile_network: mobileNetwork,
+      chain,
+      asset,
+      fee,
+      telegram_user_id: telegramUserId,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `On-ramp failed: ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function createOfframp({ amountCrypto, phoneNumber, walletAddress, transactionHash, mobileNetwork = 'Safaricom', chain = 'BASE', asset = 'USDC', fee = 0, telegramUserId = null }) {
+  const res = await fetch(`${BASE}/api/pretium/offramp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      amount_crypto: amountCrypto,
+      phone_number: phoneNumber,
+      wallet_address: walletAddress,
+      transaction_hash: transactionHash,
+      mobile_network: mobileNetwork,
+      chain,
+      asset,
+      fee,
+      telegram_user_id: telegramUserId,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Off-ramp failed: ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function getPretiumTransaction(transactionId) {
+  const res = await fetch(`${BASE}/api/pretium/transaction/${transactionId}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Transaction fetch failed: ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function getPretiumTransactions(type = null, limit = 20) {
+  const wallet = getStoredWallet();
+  if (!wallet) return { transactions: [] };
+  let url = `${BASE}/api/pretium/transactions?wallet_address=${encodeURIComponent(wallet)}&limit=${limit}`;
+  if (type) url += `&type=${type}`;
+  const res = await fetch(url);
+  if (!res.ok) return { transactions: [] };
+  return await res.json();
+}
+
+export async function getPretiumSettlementAddress(chain = 'BASE') {
+  const res = await fetch(`${BASE}/api/pretium/settlement-address?chain=${chain}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Settlement address fetch failed: ${res.status}`);
+  }
+  return await res.json();
+}
+
 // ─── REAL BALANCE ─────────────────────────────────────────────────────────────
 
 export async function getFullWallet() {

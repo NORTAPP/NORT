@@ -297,7 +297,7 @@ def _handle_funds_deposited(payload: dict, session: Session) -> dict:
 
     logger.info(f"[privy-webhook] funds.deposited: {amount} {token} → {wallet_address} on chain {chain_id}")
 
-    # TODO Phase 3: update WalletConfig.real_balance_usdc when Fonbnk deposits arrive
+    # TODO Phase 3: update WalletConfig.real_balance_usdc when Pretium deposits arrive
     return {
         "status":         "ok",
         "event":          "funds.deposited",
