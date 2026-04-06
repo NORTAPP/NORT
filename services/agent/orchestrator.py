@@ -298,7 +298,7 @@ async def run_synthesis(
         )
     else:
         # Use an extremely cheap paid model to bypass strict concurrency rate limits on free OpenRouter endpoints
-        model = "meta-llama/llama-3.1-8b-instruct"
+        model = "meta-llama/llama-3.3-70b-instruct"
         tier_instruction = (
             "\nFREE MODE: Your analysis must be 'vaguely detailed'. Use sophisticated financial and analytical language to sound highly thorough and detailed, but remain entirely vague on actionable intelligence. "
             "Discuss 'shifting momentum', 'building sentiment', and 'complex tech indicators' without giving away the actual specific numbers. Do not give exact odds, entry targets, or precise position sizing. "
@@ -362,7 +362,8 @@ Return ONLY valid JSON. The market_id field must be exactly: {market_id}
     messages.append({"role": "user", "content": user_message})
 
     payload = {
-        "model": model,
+        "model":      model,
+        "max_tokens": 2000,   # must be high enough for full JSON + premium deep-dive
         "messages": [
             {"role": "system", "content": ADVICE_SYSTEM_PROMPT},
             *messages

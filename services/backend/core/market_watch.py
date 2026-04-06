@@ -49,6 +49,9 @@ def _send_telegram_alert(chat_id: str, text: str) -> None:
     if not TELEGRAM_BOT_TOKEN:
         print("[MarketWatch] TELEGRAM_BOT_TOKEN not set — skipping send.")
         return
+    if not chat_id:
+        print("[MarketWatch] User has no Telegram chat_id — skipping send.")
+        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         with httpx.Client(timeout=10) as client:

@@ -20,6 +20,7 @@ export default function FeedPage() {
   const { user } = useTelegram();
   const [signals, setSignals]         = useState([]);
   const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState(null);
   const [category, setCategory]       = useState('crypto');
   const [filter, setFilter]           = useState('all');
   const [tradeSignal, setTradeSignal] = useState(null);
@@ -28,7 +29,15 @@ export default function FeedPage() {
 
   useEffect(() => {
     setLoading(true);
-    getSignals(filter, category).then(setSignals).finally(() => setLoading(false));
+    setError(null);
+    getSignals(filter, category)
+      .then(setSignals)
+      .catch((e) => {
+        console.warn('[FeedPage] getSignals failed:', e);
+        setSignals([]);
+        setError(e.message || 'Failed to load signals');
+      })
+      .finally(() => setLoading(false));
   }, [filter, category]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2200); };
@@ -98,7 +107,14 @@ export default function FeedPage() {
             }
           </div>
 
-          {!loading && signals.length === 0 && (
+{!loading && error && (
+            <div className="empty">
+              <div className="empty-icon">!</div>
+              <div className="empty-text">Failed to load signals: {error}</div>
+            </div>
+          )}
+
+          {!loading && !error && signals.length === 0 && (
             <div className="empty">
               <div className="empty-icon">◇</div>
               <div className="empty-text">No signals in this category</div>

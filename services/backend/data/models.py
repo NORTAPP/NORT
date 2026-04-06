@@ -40,10 +40,13 @@ class AISignal(SQLModel, table=True):
     market: Market = Relationship(back_populates="signals")
 
 # 4. Payment Table (x402)
+# market_id is a plain string — NOT a FK to market.id — because global
+# subscriptions store the sentinel value "__global__" which is not a real
+# market row. A FK constraint here would cause an integrity error on insert.
 class Payment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id")
-    market_id: str = Field(foreign_key="market.id")
+    market_id: Optional[str] = Field(default=None)   # no FK — may be "__global__" or a real market_id
     amount: float
     tx_hash: str = Field(unique=True)
     is_confirmed: bool = Field(default=False)
@@ -127,6 +130,7 @@ class Conversation(SQLModel, table=True):
     __tablename__ = "conversations"
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_user_id: str = Field(index=True)
+    nort_user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     market_id: str = Field(index=True)
     messages: list = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -138,7 +142,7 @@ class UserPermission(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_user_id: str = Field(index=True, unique=True)
     auto_trade_enabled: bool = Field(default=False)
-    trade_mode: str = Field(default="paper")   # "paper" | "real" | "confirm"
+    trade_mode: str = Field(default="paper")
     max_bet_size: float = Field(default=10.0)
     min_confidence: float = Field(default=0.75)
     preferred_language: str = Field(default="en")
@@ -187,7 +191,7 @@ class RealTrade(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-# 13. AuditLog Table  ← Task 4: request audit trail + rate limiting + feedback loop
+# 13. AuditLog Table
 class AuditLog(SQLModel, table=True):
     __tablename__ = "audit_logs"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -197,25 +201,25 @@ class AuditLog(SQLModel, table=True):
     premium: bool = Field(default=False)
     success: bool = Field(default=True)
     response_time_ms: Optional[int] = Field(default=None)
-    outcome_correct: Optional[bool] = Field(default=None)   # Task 6: set on trade close
+    outcome_correct: Optional[bool] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-# 14. PendingTrade Table  ← Task 11: confirmation flow for trade_mode="confirm"
+# 14. PendingTrade Table
 class PendingTrade(SQLModel, table=True):
     __tablename__ = "pending_trades"
     id: Optional[int] = Field(default=None, primary_key=True)
     telegram_user_id: str = Field(index=True)
     market_id: str
     market_question: str
-    suggested_plan: str       # "BUY YES" | "BUY NO"
+    suggested_plan: str
     confidence: float
     amount_usdc: float
-    status: str = Field(default="pending")   # pending|confirmed|cancelled|expired
+    status: str = Field(default="pending")
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    expires_at: datetime                     # 10 min from created_at
+    expires_at: datetime
     confirmed_at: Optional[datetime] = None
 
-# 15. AlertHistory Table  ← Task 7: prevents duplicate proactive alerts
+# 15. AlertHistory Table
 class AlertHistory(SQLModel, table=True):
     __tablename__ = "alert_history"
     id: Optional[int] = Field(default=None, primary_key=True)

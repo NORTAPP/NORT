@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv(override=True)  # MUST be first — database.py reads DATABASE_URL at import time
+
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +16,8 @@ from services.backend.api.fx import router as fx_router
 from services.backend.api.mode import router as mode_router
 from services.backend.api.bridge import router as bridge_router
 from services.backend.api.permissions import router as permissions_router  # Task 10
+from services.backend.api.chat import router as chat_router                # GlobalChatButton
+from services.backend.api.test_runner import router as test_router         # GET /agent/test
 from services.backend.api.telegram import router as telegram_router
 from services.backend.api.x402 import router as x402_router
 from services.backend.data.database import init_db, engine
@@ -32,16 +37,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Market sync failed (will retry on first /markets request): {e}")
 
-    # Task 7: Start the proactive market alert scheduler
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(run_market_watch, "interval", minutes=15, id="market_watch")
-    scheduler.start()
-    print("Market watch scheduler started (every 15 minutes).")
+    # Task 7: Proactive market alert scheduler — DISABLED (alerts turned off for now)
+    # from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    # scheduler = AsyncIOScheduler()
+    # scheduler.add_job(run_market_watch, "interval", minutes=15, id="market_watch")
+    # scheduler.start()
+    # print("Market watch scheduler started (every 15 minutes).")
+    scheduler = None  # placeholder so the yield/shutdown block below still runs cleanly
+    print("Market watch scheduler is currently disabled.")
 
     yield
 
-    scheduler.shutdown()
+    if scheduler:
+        scheduler.shutdown()
     print("Shutting down...")
 
 
@@ -80,6 +88,10 @@ app.include_router(bridge_router)
 app.include_router(bridge_router,       prefix="/api")
 app.include_router(permissions_router)           # POST|GET /permissions
 app.include_router(permissions_router,  prefix="/api")
+app.include_router(chat_router)                  # POST /agent/chat
+app.include_router(chat_router,         prefix="/api")
+app.include_router(test_router)                  # GET /agent/test
+app.include_router(test_router,         prefix="/api")
 
 
 @app.api_route("/", methods=["GET", "HEAD"])

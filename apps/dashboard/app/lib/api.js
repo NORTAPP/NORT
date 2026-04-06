@@ -109,38 +109,43 @@ export async function refreshMarkets() {
 
 // ─── ADVICE ──────────────────────────────────────────────────────────────────
 
-export async function getAdvice(marketId) {
+export async function getAdvice(marketId, userMessage = null, language = 'en') {
   const wallet = getStoredWallet();
+
   const res = await fetch(`${BASE}/agent/advice`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      market_id: String(marketId),
+      market_id:   String(marketId),
       telegram_id: wallet || null,
-      premium: false,
+      premium:     false,
+      language,
+      user_message: userMessage,
     }),
   });
   if (!res.ok) throw new Error(`Advice fetch failed: ${res.status}`);
   const data = await res.json();
   return {
-    summary:    data.summary || '',
-    why:        data.why_trending || '',
-    risks:      data.risk_factors || [],
-    plan:       data.suggested_plan || 'WAIT',
-    confidence: data.confidence || 0,
-    disclaimer: data.disclaimer || 'Paper trade only. Not financial advice.',
+    summary:           data.summary || '',
+    why:               data.why_trending || '',
+    risks:             data.risk_factors || [],
+    plan:              data.suggested_plan || 'WAIT',
+    confidence:        data.confidence || 0,
+    disclaimer:        data.disclaimer || 'Paper trade only. Not financial advice.',
+    auto_trade_result: data.auto_trade_result || null,
   };
 }
 
-export async function getPremiumAdvice(marketId) {
+export async function getPremiumAdvice(marketId, userMessage = null) {
   const wallet = getStoredWallet();
   const res = await fetch(`${BASE}/agent/advice`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      market_id: String(marketId),
+      market_id:   String(marketId),
       telegram_id: wallet || null,
-      premium: true,
+      premium:     true,
+      user_message: userMessage,
     }),
   });
   if (res.status === 402) throw new Error('PAYMENT_REQUIRED');
@@ -358,6 +363,79 @@ export async function getAchievements() {
   return data.achievements || [];
 }
 
+// ─── GLOBAL CHAT ─────────────────────────────────────────────────────────────
+
+export async function sendChat(message, language = 'en', userId = null) {
+  const wallet = userId || getStoredWallet();
+  const res = await fetch(`${BASE}/agent/chat`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      user_id:  wallet || null,
+      language,
+    }),
+  });
+  if (!res.ok) throw new Error(`Chat failed: ${res.status}`);
+  const data = await res.json();
+  return { reply: data.reply || 'No response received.' };
+}
+
+// ─── PERMISSIONS (Auto-trade) ─────────────────────────────────────────────────
+
+export async function getPermissions() {
+  const wallet = getStoredWallet();
+  if (!wallet) return null;
+  const res = await fetch(`${BASE}/api/permissions/${encodeURIComponent(wallet)}`);
+  // Auto-create a default permissions row if one doesn't exist yet
+  if (res.status === 404) {
+    const createRes = await fetch(`${BASE}/api/permissions`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telegram_user_id: wallet }),
+    });
+    if (!createRes.ok) return null;
+    return await createRes.json();
+  }
+  if (!res.ok) throw new Error(`Permissions fetch failed: ${res.status}`);
+  return await res.json();
+}
+
+export async function setPermissions(settings) {
+  const wallet = getStoredWallet();
+  if (!wallet) throw new Error('No wallet connected');
+  const res = await fetch(`${BASE}/api/permissions`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // telegram_user_id field stores wallet address for dashboard users
+    body: JSON.stringify({ telegram_user_id: wallet, ...settings }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json()).detail || ''; } catch {}
+    throw new Error(`Permissions update failed (${res.status}): ${detail}`);
+  }
+  return await res.json();
+}
+
+// ─── CONFIRM PENDING TRADE ────────────────────────────────────────────────────
+
+export async function confirmTrade(pendingId, action) {
+  const wallet = getStoredWallet();
+  if (!wallet) throw new Error('No wallet connected');
+  const res = await fetch(`${BASE}/api/trade/confirm/${pendingId}`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ telegram_user_id: wallet, action }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json()).detail || ''; } catch {}
+    throw new Error(`Trade confirm failed (${res.status}): ${detail}`);
+  }
+  return await res.json();
+}
+
 // ─── BRIDGE (Phase 2 — LI.FI Base → Polygon) ────────────────────────────────
 
 export async function getBridgeQuote(amountUsdc) {
@@ -421,6 +499,24 @@ export async function getFullWallet() {
     // keep legacy shape too
     balance:         w.paper_balance       ?? 0,
   };
+}
+
+// ─── CHAT HISTORY ─────────────────────────────────────────────────────────────
+
+export async function getChatHistory(marketId) {
+  const wallet = getStoredWallet();
+  if (!wallet || !marketId) return [];
+  const res = await fetch(
+    `${BASE}/agent/advice/history/${encodeURIComponent(marketId)}?wallet_address=${encodeURIComponent(wallet)}&t=${Date.now()}`
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.messages || []).map((m, i) => ({
+    id: `history-${i}`,
+    role: m.role === 'assistant' ? 'ai' : 'user',
+    text: m.content,
+    advice: m.advice,
+  }));
 }
 
 export async function verifyPayment(proof, marketId) {

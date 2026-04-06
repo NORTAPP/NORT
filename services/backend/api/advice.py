@@ -3,6 +3,7 @@ import httpx
 import os
 import asyncio
 import time
+import re
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -19,7 +20,7 @@ from services.agent.orchestrator import run_orchestrator
 from services.agent.prompt_templates import ADVICE_SYSTEM_PROMPT
 from services.agent.policies import check_policy
 from services.agent.executor import AutoTradeEngine
-from services.backend.core.x402_verifier import has_premium_access, payment_required_payload
+from services.backend.core.x402_verifier import has_premium_access, has_any_confirmed_payment, payment_required_payload
 from services.backend.data.database import engine
 from services.backend.data.models import Market, AISignal, AuditLog, Conversation
 
@@ -35,9 +36,10 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "").strip()
 
 class AdviceRequest(BaseModel):
     market_id: str
-    telegram_id: Optional[str] = None
+    telegram_id: Optional[str] = None   # wallet address for dashboard users, telegram ID for bot users
     premium: bool = False
     language: str = "en"
+    user_message: Optional[str] = None
 
 class AdviceResponse(BaseModel):
     market_id: str
@@ -187,6 +189,34 @@ Return JSON only. The market_id field must be exactly: {market_id}
 # Debug Endpoint
 # ─────────────────────────────────────────────────────────────
 
+@router.get("/usage")
+def get_advice_usage(wallet_address: str):
+    """
+    Returns how many free advice calls the user has made today
+    and whether they have premium access.
+    Called by the frontend useTier hook.
+    """
+    window_start = datetime.now(timezone.utc) - timedelta(hours=24)
+    with Session(engine) as session:
+        logs = session.exec(
+            select(AuditLog)
+            .where(AuditLog.telegram_user_id == wallet_address)
+            .where(AuditLog.action == "advice")
+            .where(AuditLog.created_at >= window_start)
+        ).all()
+    used_today = len(logs)
+    is_premium = any(l.premium for l in logs)
+    if not is_premium:
+        is_premium = has_any_confirmed_payment(wallet_address)
+    return {
+        "wallet_address": wallet_address,
+        "used_today":     used_today,
+        "daily_limit":    FREE_DAILY_LIMIT,
+        "is_premium":     is_premium,
+        "remaining":      max(0, FREE_DAILY_LIMIT - used_today) if not is_premium else None,
+    }
+
+
 @router.get("/advice/debug")
 async def debug_openrouter():
     market_question = "Will MicroStrategy sell any Bitcoin in 2025?"
@@ -210,33 +240,111 @@ def parse_response(
     technical_momentum: str = "NEUTRAL",
     sentiment_label: str = "Neutral",
 ) -> AdviceResponse:
+    def _extract_string_field(blob: str, field: str) -> Optional[str]:
+        pattern = rf'"{re.escape(field)}"\s*:\s*"((?:\\.|[^"\\])*)"'
+        match = re.search(pattern, blob, flags=re.S)
+        if not match:
+            return None
+        try:
+            return json.loads(f'"{match.group(1)}"')
+        except Exception:
+            return match.group(1)
+
+    def _extract_number_field(blob: str, field: str) -> Optional[float]:
+        pattern = rf'"{re.escape(field)}"\s*:\s*(-?\d+(?:\.\d+)?)'
+        match = re.search(pattern, blob)
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except Exception:
+            return None
+
+    def _extract_string_list_field(blob: str, field: str) -> Optional[list[str]]:
+        pattern = rf'"{re.escape(field)}"\s*:\s*\[(.*?)\]'
+        match = re.search(pattern, blob, flags=re.S)
+        if not match:
+            return None
+        items = re.findall(r'"((?:\\.|[^"\\])*)"', match.group(1), flags=re.S)
+        values: list[str] = []
+        for item in items:
+            try:
+                values.append(json.loads(f'"{item}"'))
+            except Exception:
+                values.append(item)
+        return values
+
+    def _salvage_partial_response(blob: str) -> Optional[dict]:
+        salvaged = {
+            "market_id": _extract_string_field(blob, "market_id") or market_id,
+            "summary": _extract_string_field(blob, "summary"),
+            "why_trending": _extract_string_field(blob, "why_trending"),
+            "risk_factors": _extract_string_list_field(blob, "risk_factors"),
+            "suggested_plan": _extract_string_field(blob, "suggested_plan"),
+            "confidence": _extract_number_field(blob, "confidence"),
+            "stale_data_warning": _extract_string_field(blob, "stale_data_warning"),
+        }
+        if not any(salvaged.values()):
+            return None
+        if not salvaged["summary"]:
+            return None
+        salvaged["why_trending"] = salvaged["why_trending"] or "Model returned a partial response."
+        salvaged["risk_factors"] = salvaged["risk_factors"] or ["Partial AI response"]
+        salvaged["suggested_plan"] = salvaged["suggested_plan"] or "WAIT"
+        salvaged["confidence"] = salvaged["confidence"] if salvaged["confidence"] is not None else 0.4
+        salvaged["stale_data_warning"] = salvaged["stale_data_warning"] or "Recovered from partial AI response."
+        return salvaged
+
     cleaned = raw.strip()
 
-    if cleaned.startswith("```"):
+    # Strip markdown fences (```json ... ``` or ``` ... ```)
+    if "```" in cleaned:
         parts = cleaned.split("```")
-        cleaned = parts[1] if len(parts) > 1 else cleaned
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
+        for part in parts:
+            candidate = part.strip()
+            if candidate.startswith("json"):
+                candidate = candidate[4:].strip()
+            if candidate.startswith("{"):
+                cleaned = candidate
+                break
 
+    # Extract the outermost JSON object
     start = cleaned.find("{")
     end = cleaned.rfind("}") + 1
     if start != -1 and end > start:
         cleaned = cleaned[start:end]
 
+    # Log the raw response to help debug future failures
+    if not cleaned.startswith("{"):
+        print(f"[ParseResponse] WARNING: Could not find JSON in response. Raw (first 300 chars): {raw[:300]}")
+
+    # If response was truncated mid-JSON, attempt to close it so json.loads has a chance
+    if cleaned.startswith("{") and not cleaned.endswith("}"):
+        print(f"[ParseResponse] WARNING: JSON appears truncated — attempting recovery")
+        # Close any open string, then close the object
+        if cleaned.count('"') % 2 != 0:
+            cleaned += '"'
+        cleaned += ', "suggested_plan": "WAIT", "confidence": 0.4, "disclaimer": "This is not financial advice.", "stale_data_warning": "Response was truncated."}'
+
     try:
         data = json.loads(cleaned)
     except json.JSONDecodeError:
-        return AdviceResponse(
-            market_id=market_id,
-            summary="Agent response could not be parsed.",
-            why_trending="Unknown",
-            risk_factors=["Invalid AI response"],
-            suggested_plan="WAIT",
-            confidence=0.0,
-            disclaimer="This is not financial advice. Paper trading only.",
-            tool_calls_used=tool_calls_used or ["parse_failed"]
-        )
+        print(f"[ParseResponse] JSON decode failed. Cleaned (first 300 chars): {cleaned[:300]}")
+        salvaged = _salvage_partial_response(cleaned)
+        if salvaged:
+            print("[ParseResponse] Recovered partial response via field extraction")
+            data = salvaged
+        else:
+            return AdviceResponse(
+                market_id=market_id,
+                summary="Agent response could not be parsed.",
+                why_trending="Unknown",
+                risk_factors=["Invalid AI response"],
+                suggested_plan="WAIT",
+                confidence=0.0,
+                disclaimer="This is not financial advice. Paper trading only.",
+                tool_calls_used=tool_calls_used or ["parse_failed"]
+            )
 
     valid_plans = {"BUY YES", "BUY NO", "WAIT"}
     suggested = str(data.get("suggested_plan", "WAIT")).upper().strip()
@@ -338,18 +446,21 @@ def fetch_market_signal(market_id: str) -> dict:
 # Max 5 advice calls per user per hour, checked against AuditLog
 # ─────────────────────────────────────────────────────────────
 
-RATE_LIMIT_MAX   = 5     # calls per window
-RATE_LIMIT_HOURS = 1     # window size in hours
+FREE_DAILY_LIMIT     = 10   # free users: 10 advice calls per day — after this they are blocked
+PREMIUM_HOURLY_LIMIT = 10   # premium users: 10 per hour (effectively unlimited for normal use)
 
-def check_rate_limit(telegram_id: str) -> None:
-    """
-    Raises HTTP 429 if this user has made >= 5 advice calls in the last hour.
-    Called before any expensive work (Tavily + LLM) so we never burn credits.
-    No-ops for anonymous users (telegram_id is None) to avoid blocking free debug calls.
-    """
+def check_rate_limit(telegram_id: str, premium: bool = False) -> None:
     if not telegram_id:
         return
-    window_start = datetime.now(timezone.utc) - timedelta(hours=RATE_LIMIT_HOURS)
+    if premium:
+        window_start = datetime.now(timezone.utc) - timedelta(hours=1)
+        limit = PREMIUM_HOURLY_LIMIT
+        label = f"{PREMIUM_HOURLY_LIMIT} calls per hour"
+    else:
+        window_start = datetime.now(timezone.utc) - timedelta(hours=24)
+        limit = FREE_DAILY_LIMIT
+        label = f"{FREE_DAILY_LIMIT} free advice calls per day"
+
     with Session(engine) as session:
         count = session.exec(
             select(AuditLog)
@@ -357,10 +468,11 @@ def check_rate_limit(telegram_id: str) -> None:
             .where(AuditLog.action == "advice")
             .where(AuditLog.created_at >= window_start)
         ).all()
-    if len(count) >= RATE_LIMIT_MAX:
+    if len(count) >= limit:
+        upgrade_hint = " Upgrade to Premium for unlimited advice." if not premium else ""
         raise HTTPException(
             status_code=429,
-            detail=f"Rate limit exceeded: max {RATE_LIMIT_MAX} advice calls per hour. Try again later."
+            detail=f"Limit reached: {label}.{upgrade_hint}"
         )
 
 
@@ -372,7 +484,6 @@ def write_audit_log(
     response_time_ms: Optional[int],
     action: str = "advice",
 ) -> None:
-    """Writes a single row to audit_logs. Never raises — errors are swallowed."""
     try:
         with Session(engine) as session:
             log = AuditLog(
@@ -397,13 +508,14 @@ def write_audit_log(
 
 CACHE_WINDOW_MINUTES = 30
 
-def get_cached_advice(telegram_id: Optional[str], market_id: str) -> Optional[AdviceResponse]:
-    """
-    Looks up the most recent Conversation record for this user+market.
-    If the last assistant message was within 30 minutes and contains valid
-    advice JSON, deserialises and returns it with a staleness warning.
-    Returns None if no valid cache entry exists.
-    """
+def get_cached_advice(
+    telegram_id: Optional[str],
+    market_id: str,
+    *,
+    allow_cache: bool = True,
+) -> Optional[AdviceResponse]:
+    if not allow_cache:
+        return None
     if not telegram_id:
         return None
     try:
@@ -454,11 +566,6 @@ def get_cached_advice(telegram_id: Optional[str], market_id: str) -> Optional[Ad
 # ─────────────────────────────────────────────────────────────
 
 def load_conversation_history(telegram_id: Optional[str], market_id: str) -> list:
-    """
-    Returns the last 10 messages for this user+market as a list of
-    {role, content} dicts — the format run_synthesis() already expects.
-    Returns [] if no history exists or on any error.
-    """
     if not telegram_id:
         return []
     try:
@@ -483,29 +590,24 @@ def load_conversation_history(telegram_id: Optional[str], market_id: str) -> lis
 
 
 def save_conversation_turn(
-    telegram_id: Optional[str],
+    user_id: Optional[str],
     market_id: str,
     user_content: str,
     advice: AdviceResponse,
 ) -> None:
-    """
-    Appends the user query and assistant advice to the Conversation table.
-    Creates the record if it doesn't exist yet.
-    The advice object is stored in full so the cache can reconstruct it.
-    """
-    if not telegram_id:
+    if not user_id:
         return
     try:
         now_str = datetime.now(timezone.utc).isoformat()
         with Session(engine) as session:
             conv = session.exec(
                 select(Conversation)
-                .where(Conversation.telegram_user_id == telegram_id)
+                .where(Conversation.telegram_user_id == user_id)
                 .where(Conversation.market_id == market_id)
             ).first()
             if conv is None:
                 conv = Conversation(
-                    telegram_user_id=telegram_id,
+                    telegram_user_id=user_id,
                     market_id=market_id,
                     messages=[],
                 )
@@ -541,14 +643,50 @@ def save_conversation_turn(
 #   9. Save conversation turn + Write AuditLog (Tasks 4 & 5)
 # ─────────────────────────────────────────────────────────────
 
-@router.post("/advice", response_model=AdviceResponse)
+@router.get("/advice/history/{market_id}")
+def get_advice_history(market_id: str, wallet_address: str):
+    """
+    Returns the stored conversation messages for a given user+market pair.
+    Used by the frontend ChatSheet to pre-populate chat history on open.
+    """
+    if not wallet_address:
+        raise HTTPException(status_code=400, detail="wallet_address query param required")
+    try:
+        with Session(engine) as session:
+            conv = session.exec(
+                select(Conversation)
+                .where(Conversation.telegram_user_id == wallet_address)
+                .where(Conversation.market_id == market_id)
+                .order_by(Conversation.updated_at.desc())
+            ).first()
+        if not conv or not conv.messages:
+            return {"market_id": market_id, "messages": []}
+        # Return the last 20 messages with role, content, and parsed advice payload
+        messages = [
+            {
+                "role": m["role"], 
+                "content": m["content"],
+                "advice": m.get("advice")
+            }
+            for m in conv.messages[-20:]
+            if "role" in m and "content" in m
+        ]
+        return {"market_id": market_id, "messages": messages}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"History fetch error: {e}")
+
+
+
 async def get_advice(request: AdviceRequest):
     tool_calls_used: list[str] = []
     start_time = time.monotonic()
     success = False
 
+    # telegram_id carries wallet_address for dashboard users, actual telegram ID for bot users
+    effective_user_id = request.telegram_id
+
     # Task 3: Rate limit check — before any expensive work
-    check_rate_limit(request.telegram_id)
+    check_rate_limit(effective_user_id, request.premium)
 
     # Policy gate — block prompt injection attempts on the market_id field
     policy = check_policy(request.market_id)
@@ -557,23 +695,29 @@ async def get_advice(request: AdviceRequest):
 
     try:
 
-        if request.premium and not has_premium_access(request.telegram_id, request.market_id):
+        if request.premium and not has_premium_access(effective_user_id, request.market_id):
             return JSONResponse(
                 status_code=402,
                 content=payment_required_payload(request.market_id),
             )
 
-        # Task 5A: Check advice cache — skip full pipeline if recent result exists
-        cached = get_cached_advice(request.telegram_id, request.market_id)
+        # Skip cache for premium flows and for fresh user questions.
+        # Otherwise users keep seeing the same answer even after typing a new request.
+        allow_cache = (not request.premium) and (not request.user_message)
+
+        # Task 5A: Check advice cache
+        cached = get_cached_advice(
+            effective_user_id,
+            request.market_id,
+            allow_cache=allow_cache,
+        )
         if cached:
             success = True
             return cached
 
-        # 1. Fetch directly from Neon — no localhost calls
         market_data   = fetch_market_data(request.market_id)
         market_signal = fetch_market_signal(request.market_id)
 
-        # 2. Extract market question
         market_question = (
             market_data.get("question") or
             market_data.get("summary") or
@@ -582,10 +726,12 @@ async def get_advice(request: AdviceRequest):
 
         print(f"[Agent] Market {request.market_id}: {market_question}")
 
-        # Task 5b: Load conversation history (sliding window — last 5 exchanges)
-        history = load_conversation_history(request.telegram_id, request.market_id)
+        # Premium users get prior conversation context.
+        # Free users do not get memory, but the current question should still shape this analysis.
+        history = load_conversation_history(effective_user_id, request.market_id) if request.premium else []
+        if request.user_message:
+            history = [*history, {"role": "user", "content": request.user_message}]
 
-        # 3. Run 3 Tavily searches in parallel
         search_context = await search_prefetch(market_question)
         tool_calls_used += [
             f"tavily_news: {search_context['queries']['news']}",
@@ -593,13 +739,12 @@ async def get_advice(request: AdviceRequest):
             f"tavily_context: {search_context['queries']['context']}"
         ]
 
-        # 4. Send everything to the multi-agent Orchestrator
         raw_response, technical_result, sentiment_result = await run_orchestrator(
             market_id=request.market_id,
             market_data=market_data,
             market_signal=market_signal,
             search_context=search_context,
-            telegram_id=request.telegram_id,
+            telegram_id=effective_user_id,
             premium=request.premium,
             history=history,
             language=request.language
@@ -614,8 +759,8 @@ async def get_advice(request: AdviceRequest):
             sentiment_label=sentiment_result.get("label", "Neutral"),
         )
 
-        # 6. Post-translate text fields if Swahili is requested
-        if request.language == "sw":
+        # Translation is a PREMIUM-only feature. Free users always get English.
+        if request.premium and request.language == "sw":
             translator = GoogleTranslator(source='en', target='sw')
             try:
                 response_obj.summary = translator.translate(response_obj.summary)
@@ -641,45 +786,36 @@ async def get_advice(request: AdviceRequest):
 
         # Task 5: Save this exchange to conversation history for future context
         save_conversation_turn(
-            telegram_id=request.telegram_id,
+            user_id=effective_user_id,
             market_id=request.market_id,
-            user_content=f"/advice {request.market_id}",
+            user_content=request.user_message or f"/advice {request.market_id}",
             advice=response_obj,
         )
 
-        # ── AUTO-TRADE ENGINE ─────────────────────────────────────────────────
-        # Only fires if the user has a telegram_id (anonymous calls are skipped).
-        # AutoTradeEngine runs all safety gates internally — this call is always safe.
-        # The result is attached to the response so the dashboard / bot can display
-        # what happened (executed, blocked, confirm pending, etc.)
-        if request.telegram_id:
+        # AUTO-TRADE ENGINE — fires for any identified user (wallet or telegram)
+        if effective_user_id:
             try:
-                # Build a stable idempotency key: user + market + minute-bucket
-                # This prevents double-execution if the client retries within the same minute
                 minute_bucket = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
-                advice_id = f"{request.telegram_id}-{request.market_id}-{minute_bucket}"
-
+                advice_id = f"{effective_user_id}-{request.market_id}-{minute_bucket}"
                 auto_result = await AutoTradeEngine.execute(
                     market_id=request.market_id,
                     suggested_plan=response_obj.suggested_plan,
                     confidence=response_obj.confidence,
-                    telegram_id=request.telegram_id,
+                    telegram_id=effective_user_id,
                     advice_id=advice_id,
                 )
                 response_obj.auto_trade_result = auto_result
                 print(f"[AutoTrade] {auto_result}")
             except Exception as e:
-                # Never let auto-trade errors block the advice response
                 print(f"[AutoTrade] Engine error (non-fatal): {e}")
                 response_obj.auto_trade_result = {"executed": False, "reason": str(e), "mode": "error"}
 
         return response_obj
 
     finally:
-        # Task 4: Always write audit log, even on unhandled exceptions
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         write_audit_log(
-            telegram_id=request.telegram_id,
+            telegram_id=effective_user_id,
             market_id=request.market_id,
             premium=request.premium,
             success=success,

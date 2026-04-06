@@ -5,12 +5,15 @@ import { useTelegram } from '@/hooks/useTelegram';
 import { useTradingMode } from '@/components/TradingModeContext';
 import AuthGate from '@/components/AuthGate';
 import Navbar from '@/components/Navbar';
-import { getFullWallet, getTrades, getUserStats, getBridgeHistory, BASE } from '@/lib/api';
+import PremiumGate from '@/components/PremiumGate';
+import { getFullWallet, getTrades, getUserStats, getBridgeHistory, getPermissions, setPermissions, BASE } from '@/lib/api';
+import { useTier } from '@/hooks/useTier';
 
 export default function ProfilePage() {
   const { user, walletAddress, logout } = useAuth();
   const { haptic } = useTelegram();
   const { mode } = useTradingMode();
+  const { tier, usedToday, remaining, atLimit, FREE_DAILY_LIMIT } = useTier();
   const isReal = mode === 'real';
 
   const [wallet, setWallet]         = useState(null);
@@ -19,11 +22,17 @@ export default function ProfilePage() {
   const [bridges, setBridges]       = useState([]);
   const [loading, setLoading]       = useState(true);
 
+  // Auto-trade permissions state
+  const [perms, setPerms]           = useState(null);
+  const [permsLoading, setPermsLoading] = useState(false);
+  const [permsSaving, setPermsSaving]   = useState(false);
+
   const [dbUsername, setDbUsername]   = useState('');
   const [editingName, setEditingName] = useState(false);
   const [newUsername, setNewUsername] = useState('');
   const [savingName, setSavingName]   = useState(false);
   const [saveError, setSaveError]     = useState('');
+  const [showPremiumGate, setShowPremiumGate] = useState(false);
 
   useEffect(() => {
     if (!walletAddress) return;
@@ -53,6 +62,25 @@ export default function ProfilePage() {
       .catch(console.warn)
       .finally(() => setLoading(false));
   }, []);
+
+  // Load auto-trade permissions
+  useEffect(() => {
+    if (!walletAddress) return;
+    setPermsLoading(true);
+    getPermissions()
+      .then(p => setPerms(p || { auto_trade_enabled: false, trade_mode: 'paper', max_bet_size: 10, min_confidence: 0.75 }))
+      .catch(() => setPerms({ auto_trade_enabled: false, trade_mode: 'paper', max_bet_size: 10, min_confidence: 0.75 }))
+      .finally(() => setPermsLoading(false));
+  }, [walletAddress]);
+
+  const savePerms = async (patch) => {
+    const updated = { ...perms, ...patch };
+    setPerms(updated);
+    setPermsSaving(true);
+    try { await setPermissions(patch); }
+    catch (e) { console.warn('Perms save failed:', e); }
+    finally { setPermsSaving(false); }
+  };
 
   const saveUsername = async () => {
     if (!newUsername.trim() || !walletAddress) return;
@@ -134,6 +162,52 @@ export default function ProfilePage() {
               </>
             )}
           </div>
+
+          {/* ── Tier Card ── */}
+          <div className="fu d2" style={{
+            margin: '0 0 4px',
+            padding: '12px 16px',
+            background: tier === 'premium' ? 'rgba(245,158,11,0.08)' : 'var(--card)',
+            borderRadius: 'var(--r)',
+            border: `1px solid ${tier === 'premium' ? 'rgba(245,158,11,0.3)' : 'var(--border)'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>AI Advice Tier</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: tier === 'premium' ? '#F59E0B' : 'var(--teal)' }}>
+                {tier === 'premium' ? '⭐ Premium' : '◈ Free'}
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              {tier === 'free' ? (
+                <>
+                  <div style={{ fontSize: 11, color: atLimit ? 'var(--red)' : 'var(--muted)' }}>
+                    {usedToday} / {FREE_DAILY_LIMIT} used today
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                    {atLimit ? '⛔ Limit reached — unlock Premium' : `${remaining} advice calls left`}
+                  </div>
+                  <button
+                    className="chip-btn"
+                    style={{ marginTop: 8, borderColor: 'rgba(245,158,11,0.35)', color: '#F59E0B' }}
+                    onClick={() => setShowPremiumGate(true)}
+                  >
+                    Upgrade to Premium
+                  </button>
+                </>
+              ) : (
+                <div style={{ fontSize: 11, color: '#F59E0B' }}>Unlimited advice ✓</div>
+              )}
+            </div>
+          </div>
+
+          <PremiumGate
+            open={showPremiumGate}
+            onClose={() => setShowPremiumGate(false)}
+            reason={atLimit ? 'limit' : 'feature'}
+            used={usedToday}
+            limit={FREE_DAILY_LIMIT}
+          />
 
           {/* ── Balance Card (mode-aware) ── */}
           <div className="sec-lbl fu d2"><span className="sec-t">Trading Stats</span>
@@ -255,6 +329,82 @@ export default function ProfilePage() {
               ))}
             </div>
           )}
+
+          {/* ── Auto-Trade Permissions ── */}
+          <div className="sec-lbl fu d7"><span className="sec-t">Auto-Trade Settings</span>
+            {permsSaving && <span className="sec-t" style={{ color: 'var(--teal)', fontSize: 10 }}>Saving...</span>}
+          </div>
+          <div className="settings-group fu d8">
+            {permsLoading ? (
+              <div className="settings-item"><div className="settings-label">Loading...</div></div>
+            ) : perms ? (<>
+              {/* Master toggle */}
+              <div className="settings-item">
+                <div className="settings-label">
+                  Auto-Trade
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                    Fire trades automatically when confidence is high enough
+                  </div>
+                </div>
+                <label className="toggle-switch">
+                  <input type="checkbox" checked={!!perms.auto_trade_enabled}
+                    onChange={e => savePerms({ auto_trade_enabled: e.target.checked })} />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+              {/* Trade mode */}
+              <div className="settings-item">
+                <div className="settings-label">
+                  Mode
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                    paper = safe sim · confirm = ask me first · real = live
+                  </div>
+                </div>
+                <select className="settings-select"
+                  value={perms.trade_mode || 'paper'}
+                  onChange={e => savePerms({ trade_mode: e.target.value })}>
+                  <option value="paper">Paper</option>
+                  <option value="confirm">Confirm</option>
+                  <option value="real">Real</option>
+                </select>
+              </div>
+              {/* Max bet */}
+              <div className="settings-item">
+                <div className="settings-label">
+                  Max Bet Size
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                    Hard cap per trade in USDC — AI cannot exceed this
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>$</span>
+                  <input type="number" min="1" max="500" step="1"
+                    className="settings-input-sm"
+                    value={perms.max_bet_size ?? 10}
+                    onBlur={e => savePerms({ max_bet_size: parseFloat(e.target.value) || 10 })}
+                    onChange={e => setPerms(p => ({ ...p, max_bet_size: e.target.value }))} />
+                </div>
+              </div>
+              {/* Min confidence */}
+              <div className="settings-item">
+                <div className="settings-label">
+                  Min Confidence
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                    Agent must score above this to fire a trade (0.75 = 75%)
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="number" min="0.5" max="1.0" step="0.05"
+                    className="settings-input-sm"
+                    value={perms.min_confidence ?? 0.75}
+                    onBlur={e => savePerms({ min_confidence: parseFloat(e.target.value) || 0.75 })}
+                    onChange={e => setPerms(p => ({ ...p, min_confidence: e.target.value }))} />
+                </div>
+              </div>
+            </>) : (
+              <div className="settings-item"><div className="settings-label">Connect wallet to manage auto-trade settings</div></div>
+            )}
+          </div>
 
           {/* ── Wallet ── */}
           <div className="sec-lbl fu d7"><span className="sec-t">Wallet</span></div>

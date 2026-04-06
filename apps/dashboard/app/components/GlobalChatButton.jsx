@@ -1,24 +1,19 @@
 'use client';
-// P-GlobalChatButton: Floating chat FAB + general-purpose chat panel.
-// Opens from any page via layout.jsx. Not tied to any market/signal.
-// Sits at bottom-right, above the mobile nav and mode pill.
-
 import { useState, useRef, useEffect } from 'react';
+import { sendChat } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 
-// P-PLACEHOLDER MESSAGE: Replace this static reply with a real API call once
-// the backend intern ships POST /agent/chat. See intern TODO list below.
 const INIT_MSG = {
   id: 'init',
   role: 'ai',
-  text: "Hey — I'm NORTBOT. Ask me anything about NORT, markets, or trading.",
+  text: "Hey — I'm OpenClaw 🤖\n\nAsk me anything about NORT, markets, or trading.\n\nTip: Type /advice <market_id> to get full AI analysis on any market.",
 };
 
 export default function GlobalChatButton() {
   const { isAuthed, walletAddress } = useAuth();
-  const [open, setOpen]         = useState(false);
+  const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([INIT_MSG]);
-  const [input, setInput]       = useState('');
+  const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
   const bottomRef = useRef(null);
 
@@ -37,13 +32,11 @@ export default function GlobalChatButton() {
     addMsg('user', q);
     setThinking(true);
     try {
-      // P-API CALL: Replace this stub with sendChat(q) from api.js once
-      // the backend intern ships POST /agent/chat. The function should live
-      // in api.js and return { reply: string }. Example shape:
-      //   const { reply } = await sendChat(q);
-      //   addMsg('ai', reply);
-      await new Promise(r => setTimeout(r, 900)); // P-STUB DELAY: remove when real endpoint is live
-      addMsg('ai', "I'm not connected to the backend yet — ask a backend intern to ship POST /agent/chat.");
+      const { reply } = await sendChat(q, 'en', walletAddress || null);
+      addMsg('ai', reply);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('nort-tier-refresh'));
+      }
     } catch {
       addMsg('ai', 'Something went wrong. Try again.');
     } finally {
@@ -61,13 +54,13 @@ export default function GlobalChatButton() {
       >
         {open
           ? /* close icon */
-            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
+          <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
           : /* chat bubble icon */
-            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-            </svg>
+          <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+          </svg>
         }
       </button>
 
@@ -98,7 +91,7 @@ export default function GlobalChatButton() {
 
             {thinking && (
               <div className="msg-thinking">
-                <span className="td"/><span className="td"/><span className="td"/>
+                <span className="td" /><span className="td" /><span className="td" />
               </div>
             )}
             <div ref={bottomRef} />
@@ -107,7 +100,7 @@ export default function GlobalChatButton() {
           <div className="chat-input-row">
             <input
               className="chat-input"
-              placeholder="Ask anything..."
+              placeholder="Ask anything or /advice <market_id>..."
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && send()}

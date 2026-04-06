@@ -2,10 +2,12 @@ import os
 from sqlmodel import SQLModel, Session, create_engine
 from sqlalchemy import text
 
-# Import all models so SQLModel knows about every table
+# Import ALL models so SQLModel registers every table with create_all()
 from services.backend.data.models import (
     User, Market, AISignal, Payment, TelegramProfile, Trade,
-    PaperTrade, WalletConfig, LeaderboardSnapshot
+    PaperTrade, WalletConfig, LeaderboardSnapshot,
+    Conversation, UserPermission, AuditLog,
+    PendingTrade, AlertHistory, BridgeTransaction, RealTrade,
 )
 
 # ─────────────────────────────────────────────
@@ -46,7 +48,14 @@ if IS_SQLITE:
         echo=False,
     )
 else:
-    engine = create_engine(DATABASE_URL, echo=False)
+    # pool_pre_ping tests connection before using to gracefully handle server-side disconnects
+    # pool_recycle forces connection re-establishment every 30 minutes
+    engine = create_engine(
+        DATABASE_URL, 
+        echo=False,
+        pool_pre_ping=True,
+        pool_recycle=1800
+    )
 
 
 # ─────────────────────────────────────────────
@@ -88,6 +97,32 @@ _COLUMN_MIGRATIONS = [
         'wallet_config.privy_user_id',
         'ALTER TABLE wallet_config ADD COLUMN IF NOT EXISTS privy_user_id VARCHAR',
         'ALTER TABLE wallet_config ADD COLUMN privy_user_id VARCHAR',
+    ),
+    # nort_user_id — integer FK to user.id — added to all identity tables
+    (
+        'conversations.nort_user_id',
+        'ALTER TABLE conversations ADD COLUMN IF NOT EXISTS nort_user_id INTEGER REFERENCES "user"(id)',
+        'ALTER TABLE conversations ADD COLUMN nort_user_id INTEGER',
+    ),
+    (
+        'wallet_config.nort_user_id',
+        'ALTER TABLE wallet_config ADD COLUMN IF NOT EXISTS nort_user_id INTEGER REFERENCES "user"(id)',
+        'ALTER TABLE wallet_config ADD COLUMN nort_user_id INTEGER',
+    ),
+    (
+        'user_permissions.nort_user_id',
+        'ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS nort_user_id INTEGER REFERENCES "user"(id)',
+        'ALTER TABLE user_permissions ADD COLUMN nort_user_id INTEGER',
+    ),
+    (
+        'paper_trades.nort_user_id',
+        'ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS nort_user_id INTEGER REFERENCES "user"(id)',
+        'ALTER TABLE paper_trades ADD COLUMN nort_user_id INTEGER',
+    ),
+    (
+        'audit_logs.nort_user_id',
+        'ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS nort_user_id INTEGER REFERENCES "user"(id)',
+        'ALTER TABLE audit_logs ADD COLUMN nort_user_id INTEGER',
     ),
 ]
 

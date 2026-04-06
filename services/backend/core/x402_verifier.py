@@ -52,6 +52,23 @@ def has_premium_access(telegram_id: str | None, market_id: str) -> bool:
         return global_payment is not None
 
 
+def has_any_confirmed_payment(telegram_id: str | None) -> bool:
+    if not telegram_id:
+        return False
+
+    with Session(engine) as session:
+        user = resolve_user_identity(str(telegram_id), session)
+        if not user:
+            return False
+
+        payment = session.exec(
+            select(Payment)
+            .where(Payment.user_id == user.id)
+            .where(Payment.is_confirmed == True)
+        ).first()
+        return payment is not None
+
+
 def verify_x402_payment(proof: str, telegram_id: str, market_id: str | None) -> dict:
     normalized_proof = (proof or "").strip()
     normalized_telegram_id = str(telegram_id).strip()
@@ -61,6 +78,51 @@ def verify_x402_payment(proof: str, telegram_id: str, market_id: str | None) -> 
         return {"verified": False, "reason": "Missing proof"}
     if not normalized_telegram_id:
         return {"verified": False, "reason": "Missing telegram_id"}
+
+    # ── DEMO BYPASS ────────────────────────────────────────────────────────────
+    # Typing "demo" instantly grants Premium for demonstration purposes.
+    # This lets you showcase the Free → Premium flow without a real payment.
+    if normalized_proof.lower() == "demo":
+        with Session(engine) as session:
+            user = resolve_user_identity(normalized_telegram_id, session)
+            if not user:
+                if normalized_telegram_id.startswith("0x"):
+                    user = connect_wallet(wallet_address=normalized_telegram_id.lower(), session=session)
+                else:
+                    synthetic_wallet = f"telegram:{normalized_telegram_id}"
+                    user = connect_wallet(
+                        wallet_address=synthetic_wallet,
+                        session=session,
+                        telegram_id=normalized_telegram_id,
+                        username=f"telegram_{normalized_telegram_id}",
+                    )
+            demo_hash = f"demo_{normalized_telegram_id}_{normalized_market_id}"
+            existing = session.exec(
+                select(Payment).where(Payment.tx_hash == demo_hash)
+            ).first()
+            if not existing:
+                payment = Payment(
+                    user_id=user.id,
+                    market_id=normalized_market_id,
+                    amount=X402_REQUIRED_AMOUNT,
+                    tx_hash=demo_hash,
+                    is_confirmed=True,
+                    timestamp=datetime.utcnow(),
+                )
+                session.add(payment)
+                session.commit()
+        return {
+            "verified": True,
+            "market_id": normalized_market_id,
+            "tx_hash": demo_hash,
+            "amount": X402_REQUIRED_AMOUNT,
+            "asset": X402_ASSET,
+            "chain": X402_CHAIN,
+            "already_verified": existing is not None,
+            "demo": True,
+        }
+    # ── END DEMO BYPASS ────────────────────────────────────────────────────────
+
     if not _looks_like_valid_proof(normalized_proof):
         return {"verified": False, "reason": "Invalid proof format"}
 

@@ -69,12 +69,12 @@ def _market_exists_in_db(market_id: str) -> bool:
         return False  # Fail closed — deny if we can't verify
 
 
-def _load_user_permission(telegram_id: str) -> Optional["UserPermission"]:
+def _load_user_permission(user_id: str) -> Optional["UserPermission"]:
     try:
         with Session(engine) as session:
             return session.exec(
                 select(UserPermission)
-                .where(UserPermission.telegram_user_id == telegram_id)
+                .where(UserPermission.telegram_user_id == user_id)
             ).first()
     except Exception as e:
         print(f"[AutoTradeEngine] Permission load failed: {e}")
@@ -151,10 +151,20 @@ class AutoTradeEngine:
         # ── Parse the outcome from suggested_plan ────────────────────────────
         outcome = "YES" if "YES" in suggested_plan else "NO"
 
-        # ── GATE 5: Route to paper or real trade ─────────────────────────────
-        # ── GATE 5: Route to paper, real, or confirm ─────────────────────────
-        # Task 11: "confirm" mode creates a PendingTrade and returns a signal
-        # for the Telegram bot to ask the user before any money moves.
+        # ── GATE 5: Enforce trade_mode — strictly from UserPermission DB record ────
+        # The AI cannot influence this. Values: "paper" | "real" | "confirm"
+        # Anything else is blocked as a safety fallback.
+        VALID_TRADE_MODES = {"paper", "real", "confirm"}
+        if perm.trade_mode not in VALID_TRADE_MODES:
+            print(f"[AutoTradeEngine] BLOCKED — unknown trade_mode '{perm.trade_mode}' for user {telegram_id}")
+            return {
+                "executed": False,
+                "reason": f"Unknown trade_mode '{perm.trade_mode}'. Trade blocked for safety.",
+                "mode": "blocked",
+            }
+
+        # "confirm" mode — create a PendingTrade and signal the Telegram bot
+        # to ask the user before any money moves.
         if perm.trade_mode == "confirm":
             from datetime import timedelta
             with Session(engine) as db:

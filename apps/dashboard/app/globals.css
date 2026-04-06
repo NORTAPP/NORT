@@ -1623,3 +1623,34 @@ body::after {
 .real-mode .card {
   border-color: rgba(245, 158, 11, 0.4) !important;
 }
+
+/* ── Auto-trade permission controls ─────────────────────────────────────── */
+.toggle-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background: var(--g2, #333); border-radius: 22px;
+  transition: background 0.2s;
+}
+.toggle-slider::before {
+  content: ''; position: absolute;
+  width: 16px; height: 16px; left: 3px; bottom: 3px;
+  background: #fff; border-radius: 50%; transition: transform 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider { background: var(--teal, #00d4aa); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+.settings-select {
+  background: var(--surface, #1a1a1a); color: var(--text, #fff);
+  border: 1px solid var(--border, #333); border-radius: 8px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer; outline: none;
+}
+.settings-select:focus { border-color: var(--teal, #00d4aa); }
+
+.settings-input-sm {
+  width: 64px; background: var(--surface, #1a1a1a); color: var(--text, #fff);
+  border: 1px solid var(--border, #333); border-radius: 8px;
+  padding: 4px 8px; font-size: 12px; text-align: right; outline: none;
+  font-family: 'DM Mono', monospace;
+}
+.settings-input-sm:focus { border-color: var(--teal, #00d4aa); }

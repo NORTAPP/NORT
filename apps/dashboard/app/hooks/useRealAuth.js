@@ -65,12 +65,18 @@ export function useRealAuth() {
   }, [wallets, authenticated, switchToBase]);
 
   // Persist wallet address to localStorage for lib/api.js
+  // Covers both Privy wallet users and Telegram-only users (tg_XXXXXXX)
   useEffect(() => {
-    if (!privyWalletAddress) return;
+    const addressToStore = privyWalletAddress
+      ? privyWalletAddress.toLowerCase()
+      : tgUser
+      ? `tg_${tgUser.id}`
+      : null;
+    if (!addressToStore) return;
     try {
-      window.localStorage.setItem("walletAddress", privyWalletAddress.toLowerCase());
+      window.localStorage.setItem("walletAddress", addressToStore);
     } catch {}
-  }, [privyWalletAddress]);
+  }, [privyWalletAddress, tgUser]);
 
   const walletAddress =
     privyWalletAddress || (tgUser ? `tg_${tgUser.id}` : null);

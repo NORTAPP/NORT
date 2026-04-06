@@ -31,7 +31,7 @@ class TradingModeError(Exception):
 
 
 def execute_trade(
-    telegram_user_id: str,
+    telegram_user_id: str,   # actually wallet_address for dashboard users
     market_id: str,
     market_question: str,
     outcome: str,
@@ -42,7 +42,8 @@ def execute_trade(
 ):
     """
     Single entry point for ALL trade execution.
-    Routes to paper or real engine based on DB trading_mode.
+    telegram_user_id is the config key — wallet_address for dashboard users,
+    telegram ID for bot-only users.
     """
     telegram_user_id = str(telegram_user_id)
     config = _ensure_wallet_config(telegram_user_id, session)
@@ -94,8 +95,8 @@ def connect_wallet(wallet_address, session, telegram_id=None, username=None):
             session.commit()
             session.refresh(user)
 
-    config_key = user.telegram_id or user.wallet_address
-    _ensure_wallet_config(config_key, session)
+    # Always key wallet_config by wallet_address — consistent for all user types
+    _ensure_wallet_config(wallet_address, session)
     return user
 
 
@@ -401,15 +402,22 @@ def get_wallet_summary(session, wallet_address=None, telegram_user_id=None):
     if wallet_address and not telegram_user_id:
         wallet_address = wallet_address.lower()
         user = get_user_by_wallet(wallet_address, session)
-        telegram_user_id = (user.telegram_id or user.wallet_address) if user else wallet_address
+        # Always use wallet_address as the config key — never telegram_id
+        config_key = wallet_address
     elif telegram_user_id and not wallet_address:
         user = get_user_by_telegram(telegram_user_id, session)
-        wallet_address = user.wallet_address if user else None
+        if user:
+            wallet_address = user.wallet_address
+            config_key = user.wallet_address
+        else:
+            config_key = telegram_user_id  # Telegram-only user fallback
+    else:
+        raise ValueError("Provide either wallet_address or telegram_user_id.")
 
-    if not telegram_user_id:
-        raise ValueError("Could not resolve a telegram_user_id.")
+    if not config_key:
+        raise ValueError("Could not resolve a config key.")
 
-    config = _ensure_wallet_config(telegram_user_id, session)
+    config = _ensure_wallet_config(config_key, session)
     mode   = getattr(config, 'trading_mode', 'paper')
 
     # ── Real mode: read from RealTrade table ─────────────────────────────────
@@ -417,7 +425,7 @@ def get_wallet_summary(session, wallet_address=None, telegram_user_id=None):
         from services.backend.data.models import RealTrade
         raw_trades    = session.exec(
             select(RealTrade)
-            .where(RealTrade.telegram_user_id == str(telegram_user_id))
+            .where(RealTrade.telegram_user_id == str(config_key))
             .order_by(RealTrade.created_at.desc())
         ).all()
         open_trades   = [t for t in raw_trades if t.status not in ("closed", "failed")]
@@ -468,12 +476,12 @@ def get_wallet_summary(session, wallet_address=None, telegram_user_id=None):
         }
 
     # ── Paper mode (original behaviour) ──────────────────────────────────────
-    settle_all_open_trades(telegram_user_id, session)
-    config = _ensure_wallet_config(telegram_user_id, session)  # re-fetch after settle
+    settle_all_open_trades(config_key, session)
+    config = _ensure_wallet_config(config_key, session)  # re-fetch after settle
 
     trades = session.exec(
         select(PaperTrade)
-        .where(PaperTrade.telegram_user_id == str(telegram_user_id))
+        .where(PaperTrade.telegram_user_id == str(config_key))
         .order_by(PaperTrade.created_at.desc())
     ).all()
 
@@ -528,7 +536,7 @@ def get_wallet_summary(session, wallet_address=None, telegram_user_id=None):
 
     return {
         "wallet_address":        wallet_address,
-        "telegram_user_id":      telegram_user_id,
+        "telegram_user_id":      config_key,
         "trading_mode":          config.trading_mode,
         "paper_balance":         round(config.paper_balance, 2),
         "real_balance_usdc":     round(config.real_balance_usdc, 2),

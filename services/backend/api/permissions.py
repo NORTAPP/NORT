@@ -35,8 +35,8 @@ class PermissionRequest(BaseModel):
     auto_trade_enabled: Optional[bool]   = None
     max_bet_size: Optional[float]        = None
     min_confidence: Optional[float]      = None
-    trade_mode: Optional[str]            = None   # "paper" | "real" | "confirm"
-    preferred_language: Optional[str]    = None   # "en" | "sw"
+    trade_mode: Optional[str]            = None
+    preferred_language: Optional[str]    = None
 
 class PermissionResponse(BaseModel):
     telegram_user_id: str
@@ -80,7 +80,6 @@ def upsert_permissions(req: PermissionRequest):
         ).first()
 
         if perm is None:
-            # First time — create with defaults, then apply any provided fields
             perm = UserPermission(telegram_user_id=req.telegram_user_id)
             session.add(perm)
 
@@ -115,15 +114,12 @@ def upsert_permissions(req: PermissionRequest):
         )
 
 
-# ─────────────────────────────────────────────────────────────
-# GET /permissions/{telegram_user_id}  — read current settings
-# ─────────────────────────────────────────────────────────────
-
 @router.get("/{telegram_user_id}", response_model=PermissionResponse)
 def get_permissions(telegram_user_id: str):
     """
-    Returns the current permission settings for a user.
-    Returns 404 if the user has never set permissions.
+    Returns permissions for a user. Auto-creates defaults on first load.
+    The telegram_user_id here is actually the wallet address for dashboard
+    users — it's whatever identifier the frontend passes.
     """
     with Session(engine) as session:
         perm = session.exec(
@@ -132,11 +128,10 @@ def get_permissions(telegram_user_id: str):
         ).first()
 
         if not perm:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No permissions found for user '{telegram_user_id}'. "
-                       f"Use POST /permissions to create them."
-            )
+            perm = UserPermission(telegram_user_id=telegram_user_id)
+            session.add(perm)
+            session.commit()
+            session.refresh(perm)
 
         return PermissionResponse(
             telegram_user_id=perm.telegram_user_id,
