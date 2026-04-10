@@ -5,6 +5,7 @@ import { useTelegram } from '@/hooks/useTelegram';
 import { useTradingMode } from '@/components/TradingModeContext';
 import AuthGate from '@/components/AuthGate';
 import Navbar from '@/components/Navbar';
+import Header from '@/components/Header';
 import {
   getFullWallet,
   getPretiumRate,
@@ -72,7 +73,7 @@ export default function WalletPage() {
   useEffect(() => {
     getFullWallet()
       .then(setWallet)
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, []);
 
@@ -82,7 +83,7 @@ export default function WalletPage() {
       setHistoryLoading(true);
       getPretiumTransactions()
         .then(d => setTransactions(d.transactions || []))
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => setHistoryLoading(false));
     }
   }, [tab]);
@@ -93,7 +94,7 @@ export default function WalletPage() {
       setRateLoading(true);
       getPretiumRate()
         .then(setRate)
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => setRateLoading(false));
     }
   }, [tab]);
@@ -103,7 +104,7 @@ export default function WalletPage() {
     if (tab === 'withdraw') {
       getPretiumSettlementAddress()
         .then(d => setSettlementAddress(d.address || ''))
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [tab]);
 
@@ -115,9 +116,9 @@ export default function WalletPage() {
         const tx = await getPretiumTransaction(activeTx.transaction_id);
         setActiveTx(tx);
         if (TERMINAL.has(tx.status)) {
-          getFullWallet().then(setWallet).catch(() => {});
+          getFullWallet().then(setWallet).catch(() => { });
         }
-      } catch {}
+      } catch { }
     }, 5000);
     return () => clearInterval(interval);
   }, [activeTx]);
@@ -232,8 +233,8 @@ export default function WalletPage() {
                   key={t.key}
                   onClick={() => { setTab(t.key); setAmount(''); setTxError(''); setTxHash(''); }}
                   className={`filter-tab ${tab === t.key ? 'on' : ''}`}
-                  style={{ 
-                    flex: 1, 
+                  style={{
+                    flex: 1,
                     color: (tab === t.key && isReal) ? '#F59E0B' : undefined,
                     borderColor: (tab === t.key && isReal) ? '#F59E0B' : undefined
                   }}
@@ -378,8 +379,8 @@ export default function WalletPage() {
                       key={v}
                       className={`m-chip ${amount === String(v) ? 'on' : ''}`}
                       onClick={() => setAmount(String(v))}
-                      style={{ 
-                        flex: 1, 
+                      style={{
+                        flex: 1,
                         textAlign: 'center',
                         color: (amount === String(v) && isReal) ? '#F59E0B' : undefined,
                         borderColor: (amount === String(v) && isReal) ? '#F59E0B' : undefined
@@ -428,8 +429,8 @@ export default function WalletPage() {
                   className="modal-cta"
                   onClick={handleDeposit}
                   disabled={txLoading || !amount || !phone.trim()}
-                  style={{ 
-                    width: '100%', 
+                  style={{
+                    width: '100%',
                     marginTop: 12
                   }}
                 >
@@ -475,9 +476,9 @@ export default function WalletPage() {
                       className={`m-chip ${amount === String(v) ? 'on' : ''}`}
                       onClick={() => setAmount(String(v))}
                       disabled={v > realBalance}
-                      style={{ 
-                        flex: 1, 
-                        textAlign: 'center', 
+                      style={{
+                        flex: 1,
+                        textAlign: 'center',
                         opacity: v > realBalance ? 0.3 : 1,
                         color: (amount === String(v) && isReal) ? '#F59E0B' : undefined,
                         borderColor: (amount === String(v) && isReal) ? '#F59E0B' : undefined
@@ -490,9 +491,9 @@ export default function WalletPage() {
                     className={`m-chip ${amount === String(realBalance) ? 'on' : ''}`}
                     onClick={() => setAmount(String(realBalance))}
                     disabled={realBalance <= 0}
-                    style={{ 
-                      flex: 1, 
-                      textAlign: 'center', 
+                    style={{
+                      flex: 1,
+                      textAlign: 'center',
                       opacity: realBalance <= 0 ? 0.3 : 1,
                       color: (amount === String(realBalance) && isReal) ? '#F59E0B' : undefined,
                       borderColor: (amount === String(realBalance) && isReal) ? '#F59E0B' : undefined
@@ -578,8 +579,8 @@ export default function WalletPage() {
                   className="modal-cta"
                   onClick={handleWithdraw}
                   disabled={txLoading || !amount || !phone.trim() || !txHash.trim()}
-                  style={{ 
-                    width: '100%', 
+                  style={{
+                    width: '100%',
                     marginTop: 12
                   }}
                 >
